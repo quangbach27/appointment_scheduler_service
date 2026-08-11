@@ -1,0 +1,31 @@
+name: "unified-service-scheduler"
+
+services:
+  scheduler-app:
+    container_name: scheduler-app
+    build:
+      context: docker/app/local
+    volumes:
+      # Source code volumes
+      - ./internal:/app/internal
+      - ./cmd:/app/cmd
+      # Go module files
+      - ./go.mod:/app/go.mod
+      - ./go.sum:/app/go.sum
+      # Go cache volumes
+      - ./.go/pkg:/app/go/pkg
+      - ./.go-cache:/app/go-cache
+    working_dir: /app
+    ports:
+      - "127.0.0.1:4000:$PORT" # App port
+    env_file:
+      - .env
+    environment:
+      DEBUG: "${DEBUG:-false}"
+      GOCACHE: /app/go-cache
+    depends_on:
+    - sumni-finance-db
+    # - keycloak
+    networks:
+      - finance-app
+  

@@ -1,0 +1,135 @@
+name: Commit Stage
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+env: 
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  VERSION: ${{ github.sha }}
+
+jobs:
+  build:
+    name: Build and Test
+    if: github.event_name == 'push' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    # services:
+    #   postgres:
+    #     image: postgres:17.6-alpine3.22
+    #     env:
+    #       POSTGRES_USER: user
+    #       POSTGRES_PASSWORD: password
+    #       POSTGRES_DB: sumni-finance
+    #     ports:
+    #       - 5432:5432
+    #     options: >-
+    #       --health-cmd "pg_isready -U user"
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+          cache-dependency-path: go.sum
+      
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.4
+          args: --timeout=5m
+
+      - name: Test
+        run: make test
+
+      - name: Build 
+        run: go build -v ./...
+
+      - uses: anchore/scan-action@v7
+        id: scan
+        with:
+          path: "."
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Upload Anchore scan SARIF report
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+
+  package:
+    name: Package and Publish
+    if: github.event_name == 'push'
+    needs: [ build ]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Build container image
+        run: docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} -f docker/app/prod/Dockerfile .
+
+      - uses: anchore/scan-action@v7
+        id: scan
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Upload Anchore scan SARIF report
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+      
+      - name: Log into container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Publish image
+        run: docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+      
+      - name: Publish image (latest)
+        run: |
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+  
+
+  
+  trigger-acceptance:
+    name: Trigger Acceptance Stage
+    needs: [package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Dispatch to acceptance stage
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          event-type: acceptance-stage
+          client-payload: '{"image_tag": "${{ github.sha }}"}'

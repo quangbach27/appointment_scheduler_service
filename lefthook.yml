@@ -1,0 +1,8 @@
+pre-push:
+  commands:
+    test-unit:
+      run: task test-unit
+    lint:
+      run: task lint
+    fmt:
+      run: task fmt
