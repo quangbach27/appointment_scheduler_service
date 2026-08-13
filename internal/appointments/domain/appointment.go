@@ -7,13 +7,28 @@ import (
 	"scheduler/internal/common"
 )
 
+type RequestAppointmentParams struct {
+	UserID         string
+	IdempotencyKey string // this help to prevent over request booking due to networking issue
+	DealerShipID   string
+	StartTime      time.Time
+	EndTime        time.Time
+	Vehicle        *Vehicle
+}
+
 type AppointmentRepository interface {
+	FindReservationByIdempotencyKey(
+		ctx context.Context,
+		idempotencyKey string,
+	) (reservationUUID ReservationUUID, found bool, err error)
+
 	RequestAppointment(
 		ctx context.Context,
-		userID string,
-		vehicle *Vehicle,
-		appointment *Appointment,
-		reservation *Reservation,
+		params RequestAppointmentParams,
+		createFn func(
+			busyServiceBayIDs map[string]string,
+			busyTechnicianIDs map[string]string,
+		) (*Appointment, *Reservation, error),
 	) (ReservationUUID, error)
 
 	ConfirmAppointment(

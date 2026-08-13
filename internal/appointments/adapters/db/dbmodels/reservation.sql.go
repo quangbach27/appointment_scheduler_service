@@ -12,10 +12,9 @@ import (
 	"scheduler/internal/appointments/domain"
 )
 
-const createReservation = `-- name: CreateReservation :one
+const createReservation = `-- name: CreateReservation :exec
 INSERT INTO appointments.reservation (reservation_uuid, appointment_uuid, created_at, expired_at, idempotency_key)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING reservation_uuid, appointment_uuid, created_at, expired_at, idempotency_key
 `
 
 type CreateReservationParams struct {
@@ -26,23 +25,15 @@ type CreateReservationParams struct {
 	IdempotencyKey  string
 }
 
-func (q *Queries) CreateReservation(ctx context.Context, arg CreateReservationParams) (AppointmentsReservation, error) {
-	row := q.db.QueryRow(ctx, createReservation,
+func (q *Queries) CreateReservation(ctx context.Context, arg CreateReservationParams) error {
+	_, err := q.db.Exec(ctx, createReservation,
 		arg.ReservationUuid,
 		arg.AppointmentUuid,
 		arg.CreatedAt,
 		arg.ExpiredAt,
 		arg.IdempotencyKey,
 	)
-	var i AppointmentsReservation
-	err := row.Scan(
-		&i.ReservationUuid,
-		&i.AppointmentUuid,
-		&i.CreatedAt,
-		&i.ExpiredAt,
-		&i.IdempotencyKey,
-	)
-	return i, err
+	return err
 }
 
 const getReservationByIdempotencyKey = `-- name: GetReservationByIdempotencyKey :one
@@ -83,17 +74,8 @@ func (q *Queries) GetReservationByUUID(ctx context.Context, reservationUuid doma
 
 const getReservationWithAppointmentByUUID = `-- name: GetReservationWithAppointmentByUUID :one
 SELECT
-    r.reservation_uuid,
-    r.expired_at,
-    a.appointment_uuid,
-    a.status,
-    a.dealer_ship_id,
-    a.service_bay_id,
-    a.technician_id,
-    a.service_type,
-    a.vehicle_uuid,
-    a.start_time,
-    a.estimated_end_time
+    r.reservation_uuid, r.appointment_uuid, r.created_at, r.expired_at, r.idempotency_key,
+    a.appointment_uuid, a.dealer_ship_id, a.service_bay_id, a.technician_id, a.user_id, a.service_type, a.start_time, a.estimated_end_time, a.status, a.vehicle_uuid
 FROM appointments.reservation r
 JOIN appointments.appointment a ON a.appointment_uuid = r.appointment_uuid
 WHERE r.reservation_uuid = $1 AND a.user_id = $2
@@ -105,34 +87,29 @@ type GetReservationWithAppointmentByUUIDParams struct {
 }
 
 type GetReservationWithAppointmentByUUIDRow struct {
-	ReservationUuid  domain.ReservationUUID
-	ExpiredAt        time.Time
-	AppointmentUuid  domain.AppointmentUUID
-	Status           domain.AppointmentStatus
-	DealerShipID     string
-	ServiceBayID     string
-	TechnicianID     string
-	ServiceType      string
-	VehicleUuid      domain.VehicleUUID
-	StartTime        time.Time
-	EstimatedEndTime time.Time
+	AppointmentsReservation AppointmentsReservation
+	AppointmentsAppointment AppointmentsAppointment
 }
 
 func (q *Queries) GetReservationWithAppointmentByUUID(ctx context.Context, arg GetReservationWithAppointmentByUUIDParams) (GetReservationWithAppointmentByUUIDRow, error) {
 	row := q.db.QueryRow(ctx, getReservationWithAppointmentByUUID, arg.ReservationUuid, arg.UserID)
 	var i GetReservationWithAppointmentByUUIDRow
 	err := row.Scan(
-		&i.ReservationUuid,
-		&i.ExpiredAt,
-		&i.AppointmentUuid,
-		&i.Status,
-		&i.DealerShipID,
-		&i.ServiceBayID,
-		&i.TechnicianID,
-		&i.ServiceType,
-		&i.VehicleUuid,
-		&i.StartTime,
-		&i.EstimatedEndTime,
+		&i.AppointmentsReservation.ReservationUuid,
+		&i.AppointmentsReservation.AppointmentUuid,
+		&i.AppointmentsReservation.CreatedAt,
+		&i.AppointmentsReservation.ExpiredAt,
+		&i.AppointmentsReservation.IdempotencyKey,
+		&i.AppointmentsAppointment.AppointmentUuid,
+		&i.AppointmentsAppointment.DealerShipID,
+		&i.AppointmentsAppointment.ServiceBayID,
+		&i.AppointmentsAppointment.TechnicianID,
+		&i.AppointmentsAppointment.UserID,
+		&i.AppointmentsAppointment.ServiceType,
+		&i.AppointmentsAppointment.StartTime,
+		&i.AppointmentsAppointment.EstimatedEndTime,
+		&i.AppointmentsAppointment.Status,
+		&i.AppointmentsAppointment.VehicleUuid,
 	)
 	return i, err
 }

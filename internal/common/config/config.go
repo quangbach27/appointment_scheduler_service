@@ -26,6 +26,7 @@ type AppConfig struct {
 type AppointmentConfig struct {
 	ReservationTTL   time.Duration
 	MinStartLeadTime time.Duration
+	MaxStartLeadTime time.Duration
 }
 
 type DBConfig struct {
@@ -78,10 +79,12 @@ func newAppConfig() *AppConfig {
 func newAppointmentConfig() *AppointmentConfig {
 	reservationTTLMinutes := getIntEnv("APPOINTMENT_RESERVATION_TTL_MINUTES", 5)
 	minStartLeadTimeHours := getIntEnv("APPOINTMENT_MIN_START_LEAD_TIME_HOURS", 1)
+	maxStartLeadTimeDays := getIntEnv("APPOINTMENT_MAX_START_LEAD_TIME_DAYS", 30)
 
 	return &AppointmentConfig{
 		ReservationTTL:   time.Duration(reservationTTLMinutes) * time.Minute,
 		MinStartLeadTime: time.Duration(minStartLeadTimeHours) * time.Hour,
+		MaxStartLeadTime: time.Duration(maxStartLeadTimeDays) * 24 * time.Hour,
 	}
 }
 

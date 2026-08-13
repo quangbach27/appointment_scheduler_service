@@ -65,10 +65,33 @@ type ErrorResponse struct {
 // GetReservationResponse defines model for GetReservationResponse.
 type GetReservationResponse struct {
 	Appointment AppointmentDetailResponse `json:"appointment"`
+	CreatedAt   time.Time                 `json:"createdAt"`
 	ExpiredAt   time.Time                 `json:"expiredAt"`
 
 	// ReservationUuid UUID of the reservation
 	ReservationUuid ReservationUUID `json:"reservationUuid"`
+}
+
+// RequestBookingRequest defines model for RequestBookingRequest.
+type RequestBookingRequest struct {
+	DealerShipId string                `json:"dealerShipId"`
+	ServiceType  string                `json:"serviceType"`
+	StartTime    time.Time             `json:"startTime"`
+	Vehicle      RequestBookingVehicle `json:"vehicle"`
+}
+
+// RequestBookingResponse defines model for RequestBookingResponse.
+type RequestBookingResponse struct {
+	// ReservationUuid UUID of the reservation
+	ReservationUuid ReservationUUID `json:"reservationUuid"`
+}
+
+// RequestBookingVehicle defines model for RequestBookingVehicle.
+type RequestBookingVehicle struct {
+	LicensePlate *string `json:"licensePlate,omitempty"`
+	MakeCode     string  `json:"makeCode"`
+	ModelName    string  `json:"modelName"`
+	ModelYear    int     `json:"modelYear"`
 }
 
 // ReservationUUID UUID of the reservation
@@ -77,23 +100,35 @@ type ReservationUUID = domain.ReservationUUID
 // VehicleUUID UUID of the vehicle
 type VehicleUUID = domain.VehicleUUID
 
+// RequestBookingParams defines parameters for RequestBooking.
+type RequestBookingParams struct {
+	XUserId        *string `json:"X-User-Id,omitempty"`
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // CancelAppointmentParams defines parameters for CancelAppointment.
 type CancelAppointmentParams struct {
-	XUserId string `json:"X-User-Id"`
+	XUserId *string `json:"X-User-Id,omitempty"`
 }
 
 // GetReservationParams defines parameters for GetReservation.
 type GetReservationParams struct {
-	XUserId string `json:"X-User-Id"`
+	XUserId *string `json:"X-User-Id,omitempty"`
 }
 
 // ConfirmAppointmentParams defines parameters for ConfirmAppointment.
 type ConfirmAppointmentParams struct {
-	XUserId string `json:"X-User-Id"`
+	XUserId *string `json:"X-User-Id,omitempty"`
 }
+
+// RequestBookingJSONRequestBody defines body for RequestBooking for application/json ContentType.
+type RequestBookingJSONRequestBody = RequestBookingRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// RequestBooking Request a booking, holding a technician and service bay with a reservation
+	// (POST /appointments)
+	RequestBooking(ctx echo.Context, params RequestBookingParams) error
 	// CancelAppointment Cancel a confirmed appointment
 	// (POST /appointments/{appointmentUuid}/cancel)
 	CancelAppointment(ctx echo.Context, appointmentUuid AppointmentUUID, params CancelAppointmentParams) error
@@ -108,6 +143,50 @@ type ServerInterface interface {
 // ServerInterfaceWrapper converts echo contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler ServerInterface
+}
+
+// RequestBooking converts echo context to params.
+func (w *ServerInterfaceWrapper) RequestBooking(ctx echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RequestBookingParams
+
+	headers := ctx.Request().Header
+	// ------------- Optional header parameter "X-User-Id" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
+		var XUserId string
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
+		}
+
+		params.XUserId = &XUserId
+	}
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Idempotency-Key, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Idempotency-Key: %s", err))
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.RequestBooking(ctx, params)
+	return err
 }
 
 // CancelAppointment converts echo context to params.
@@ -125,7 +204,7 @@ func (w *ServerInterfaceWrapper) CancelAppointment(ctx echo.Context) error {
 	var params CancelAppointmentParams
 
 	headers := ctx.Request().Header
-	// ------------- Required header parameter "X-User-Id" -------------
+	// ------------- Optional header parameter "X-User-Id" -------------
 	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
 		var XUserId string
 		n := len(valueList)
@@ -133,14 +212,12 @@ func (w *ServerInterfaceWrapper) CancelAppointment(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
 		}
 
-		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
 		}
 
-		params.XUserId = XUserId
-	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter X-User-Id is required, but not found"))
+		params.XUserId = &XUserId
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -163,7 +240,7 @@ func (w *ServerInterfaceWrapper) GetReservation(ctx echo.Context) error {
 	var params GetReservationParams
 
 	headers := ctx.Request().Header
-	// ------------- Required header parameter "X-User-Id" -------------
+	// ------------- Optional header parameter "X-User-Id" -------------
 	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
 		var XUserId string
 		n := len(valueList)
@@ -171,14 +248,12 @@ func (w *ServerInterfaceWrapper) GetReservation(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
 		}
 
-		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
 		}
 
-		params.XUserId = XUserId
-	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter X-User-Id is required, but not found"))
+		params.XUserId = &XUserId
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -201,7 +276,7 @@ func (w *ServerInterfaceWrapper) ConfirmAppointment(ctx echo.Context) error {
 	var params ConfirmAppointmentParams
 
 	headers := ctx.Request().Header
-	// ------------- Required header parameter "X-User-Id" -------------
+	// ------------- Optional header parameter "X-User-Id" -------------
 	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
 		var XUserId string
 		n := len(valueList)
@@ -209,14 +284,12 @@ func (w *ServerInterfaceWrapper) ConfirmAppointment(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
 		}
 
-		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
 		}
 
-		params.XUserId = XUserId
-	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter X-User-Id is required, but not found"))
+		params.XUserId = &XUserId
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -271,10 +344,107 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 		Handler: si,
 	}
 
+	router.POST(options.BaseURL+"/appointments", wrapper.RequestBooking, options.OperationMiddlewares["requestBooking"]...)
 	router.POST(options.BaseURL+"/reservations/:reservationUuid/confirm", wrapper.ConfirmAppointment, options.OperationMiddlewares["confirmAppointment"]...)
 	router.GET(options.BaseURL+"/reservations/:reservationUuid", wrapper.GetReservation, options.OperationMiddlewares["getReservation"]...)
 	router.POST(options.BaseURL+"/appointments/:appointmentUuid/cancel", wrapper.CancelAppointment, options.OperationMiddlewares["cancelAppointment"]...)
 
+}
+
+type RequestBookingRequestObject struct {
+	Params RequestBookingParams
+	Body   *RequestBookingJSONRequestBody
+}
+
+type RequestBookingResponseObject interface {
+	VisitRequestBookingResponse(w http.ResponseWriter) error
+}
+
+type RequestBooking201JSONResponse RequestBookingResponse
+
+func (response RequestBooking201JSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBooking400JSONResponse ErrorResponse
+
+func (response RequestBooking400JSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBooking401JSONResponse ErrorResponse
+
+func (response RequestBooking401JSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBooking404JSONResponse ErrorResponse
+
+func (response RequestBooking404JSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBooking409JSONResponse ErrorResponse
+
+func (response RequestBooking409JSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBookingdefaultJSONResponse struct {
+	Body       ErrorResponse
+	StatusCode int
+}
+
+func (response RequestBookingdefaultJSONResponse) VisitRequestBookingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type CancelAppointmentRequestObject struct {
@@ -547,6 +717,9 @@ func (response ConfirmAppointmentdefaultJSONResponse) VisitConfirmAppointmentRes
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// RequestBooking Request a booking, holding a technician and service bay with a reservation
+	// (POST /appointments)
+	RequestBooking(ctx context.Context, request RequestBookingRequestObject) (RequestBookingResponseObject, error)
 	// CancelAppointment Cancel a confirmed appointment
 	// (POST /appointments/{appointmentUuid}/cancel)
 	CancelAppointment(ctx context.Context, request CancelAppointmentRequestObject) (CancelAppointmentResponseObject, error)
@@ -568,6 +741,47 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// RequestBooking operation middleware
+func (sh *strictHandler) RequestBooking(ctx echo.Context, params RequestBookingParams) error {
+	var request RequestBookingRequestObject
+
+	request.Params = params
+
+	var body RequestBookingJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestBooking(ctx.Request().Context(), request.(RequestBookingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestBooking")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(RequestBookingResponseObject); ok {
+		return validResponse.VisitRequestBookingResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
 }
 
 // CancelAppointment operation middleware

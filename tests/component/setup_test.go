@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"scheduler/internal"
+	"scheduler/internal/appointments/adapters/catalog"
+	"scheduler/internal/appointments/adapters/workforce"
 	appointmentClient "scheduler/internal/appointments/ports/http/client"
 	"scheduler/internal/common/config"
 	commonHTTP "scheduler/internal/common/http"
@@ -33,7 +35,10 @@ func TestMain(m *testing.M) {
 		ctx,
 		config,
 		dbPgx,
-		internal.ExternalService{},
+		internal.ExternalService{
+			AppointmentCatalog:   catalog.NewStubCatalogService(),
+			AppointmentWorkforce: workforce.NewStubWorkforceService(),
+		},
 	)
 	if err != nil {
 		panic(err)
@@ -55,11 +60,11 @@ func waitForHttpServerInMain() {
 	for i := 0; i < maxAttempts; i++ {
 		resp, err := http.Get(fmt.Sprintf("%s/healthz", baseURL))
 		if err == nil && resp.StatusCode < 300 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

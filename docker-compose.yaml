@@ -27,7 +27,6 @@ services:
     depends_on:
       scheduler-db:
         condition: service_healthy
-    # - keycloak
     networks:
       - scheduler-network
 

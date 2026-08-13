@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"scheduler/internal"
+	"scheduler/internal/appointments/adapters/catalog"
+	"scheduler/internal/appointments/adapters/workforce"
 	"scheduler/internal/common/config"
 	"scheduler/internal/common/log"
 )
@@ -28,7 +30,10 @@ func main() {
 		panic(err)
 	}
 
-	externalService := internal.ExternalService{}
+	externalService := internal.ExternalService{
+		AppointmentCatalog:   catalog.NewStubCatalogService(),
+		AppointmentWorkforce: workforce.NewStubWorkforceService(),
+	}
 	svc, err := internal.New(
 		ctx,
 		config,

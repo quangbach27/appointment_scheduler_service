@@ -9,7 +9,7 @@ import (
 )
 
 func (h Handlers) CancelAppointment(ctx context.Context, request CancelAppointmentRequestObject) (CancelAppointmentResponseObject, error) {
-	userID := strings.TrimSpace(request.Params.XUserId)
+	userID := strings.TrimSpace(common.SafeDeref(request.Params.XUserId, ""))
 	if userID == "" {
 		return nil, common.NewUnauthorizedError("missing-user-id", "X-User-Id header is required")
 	}

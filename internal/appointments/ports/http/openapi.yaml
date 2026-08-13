@@ -3,6 +3,64 @@ info:
   title: Appointments API
   version: 1.0.0
 paths:
+  /appointments:
+    post:
+      operationId: requestBooking
+      summary: Request a booking, holding a technician and service bay with a reservation
+      parameters:
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestBookingRequest'
+      responses:
+        '201':
+          description: Booking requested, reservation held. Fetch the appointment details and hold expiry via GET /reservations/{reservationUuid}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestBookingResponse'
+        '400':
+          description: Invalid appointment or vehicle input (invalid-appointment / invalid-vehicle / missing-idempotency-key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: X-User-Id header is missing or empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown service type (service-type-not-found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: No technician or service bay is free for this time (no-availability)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reservations/{reservationUuid}/confirm:
     post:
       operationId: confirmAppointment
@@ -15,7 +73,7 @@ paths:
             $ref: '#/components/schemas/ReservationUUID'
         - name: X-User-Id
           in: header
-          required: true
+          required: false
           schema:
             type: string
       responses:
@@ -73,7 +131,7 @@ paths:
             $ref: '#/components/schemas/ReservationUUID'
         - name: X-User-Id
           in: header
-          required: true
+          required: false
           schema:
             type: string
       responses:
@@ -113,7 +171,7 @@ paths:
             $ref: '#/components/schemas/AppointmentUUID'
         - name: X-User-Id
           in: header
-          required: true
+          required: false
           schema:
             type: string
       responses:
@@ -151,6 +209,37 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
+    RequestBookingRequest:
+      type: object
+      required: [dealerShipId, serviceType, startTime, vehicle]
+      properties:
+        dealerShipId:
+          type: string
+        serviceType:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        vehicle:
+          $ref: '#/components/schemas/RequestBookingVehicle'
+    RequestBookingVehicle:
+      type: object
+      required: [makeCode, modelName, modelYear]
+      properties:
+        makeCode:
+          type: string
+        modelName:
+          type: string
+        modelYear:
+          type: integer
+        licensePlate:
+          type: string
+    RequestBookingResponse:
+      type: object
+      required: [reservationUuid]
+      properties:
+        reservationUuid:
+          $ref: '#/components/schemas/ReservationUUID'
     ConfirmAppointmentResponse:
       type: object
       required: [appointmentUuid, status]
@@ -187,10 +276,13 @@ components:
         path: scheduler/internal/appointments/domain
     GetReservationResponse:
       type: object
-      required: [reservationUuid, expiredAt, appointment]
+      required: [reservationUuid, createdAt, expiredAt, appointment]
       properties:
         reservationUuid:
           $ref: '#/components/schemas/ReservationUUID'
+        createdAt:
+          type: string
+          format: date-time
         expiredAt:
           type: string
           format: date-time

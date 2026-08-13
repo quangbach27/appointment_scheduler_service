@@ -43,19 +43,22 @@ func (r *ReservationReadModel) GetReservationByID(
 		return httpport.GetReservationResponse{}, err
 	}
 
+	reservation, appointment := row.AppointmentsReservation, row.AppointmentsAppointment
+
 	return httpport.GetReservationResponse{
-		ReservationUuid: row.ReservationUuid,
-		ExpiredAt:       row.ExpiredAt,
+		ReservationUuid: reservation.ReservationUuid,
+		CreatedAt:       reservation.CreatedAt,
+		ExpiredAt:       reservation.ExpiredAt,
 		Appointment: httpport.AppointmentDetailResponse{
-			AppointmentUuid:  row.AppointmentUuid,
-			Status:           row.Status,
-			DealerShipId:     row.DealerShipID,
-			ServiceBayId:     row.ServiceBayID,
-			TechnicianId:     row.TechnicianID,
-			ServiceType:      row.ServiceType,
-			VehicleUuid:      row.VehicleUuid,
-			StartTime:        row.StartTime,
-			EstimatedEndTime: row.EstimatedEndTime,
+			AppointmentUuid:  appointment.AppointmentUuid,
+			Status:           appointment.Status,
+			DealerShipId:     appointment.DealerShipID,
+			ServiceBayId:     appointment.ServiceBayID,
+			TechnicianId:     appointment.TechnicianID,
+			ServiceType:      appointment.ServiceType,
+			VehicleUuid:      appointment.VehicleUuid,
+			StartTime:        appointment.StartTime,
+			EstimatedEndTime: appointment.EstimatedEndTime,
 		},
 	}, nil
 }

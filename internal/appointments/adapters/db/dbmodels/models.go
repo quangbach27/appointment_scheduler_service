@@ -62,10 +62,10 @@ type AppointmentsAppointment struct {
 	TechnicianID     string
 	UserID           string
 	ServiceType      string
-	VehicleUuid      domain.VehicleUUID
 	StartTime        time.Time
 	EstimatedEndTime time.Time
 	Status           domain.AppointmentStatus
+	VehicleUuid      domain.VehicleUUID
 }
 
 type AppointmentsReservation struct {

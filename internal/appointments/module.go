@@ -16,14 +16,18 @@ import (
 )
 
 type Module struct {
-	config   *config.Config
-	pgxDb    *pgxpool.Pool
-	handlers httpPort.Handlers
+	config           *config.Config
+	pgxDb            *pgxpool.Pool
+	catalogService   app.CatalogService
+	workforceService app.WorkforceService
+	handlers         httpPort.Handlers
 }
 
 func NewModule(
 	config *config.Config,
 	pgxDb *pgxpool.Pool,
+	catalogService app.CatalogService,
+	workforceService app.WorkforceService,
 ) *Module {
 	if config == nil {
 		panic("config can't be nil")
@@ -33,9 +37,19 @@ func NewModule(
 		panic("db can't be nil")
 	}
 
+	if catalogService == nil {
+		panic("catalogService can't be nil")
+	}
+
+	if workforceService == nil {
+		panic("workforceService can't be nil")
+	}
+
 	return &Module{
-		config: config,
-		pgxDb:  pgxDb,
+		config:           config,
+		pgxDb:            pgxDb,
+		catalogService:   catalogService,
+		workforceService: workforceService,
 	}
 }
 
@@ -57,12 +71,18 @@ func (m *Module) Init(ctx context.Context) error {
 		return err
 	}
 
-	bookingFactory := domain.NewBookingFactory(domain.BookingFactoryConfig{})
+	bookingFactory := domain.NewBookingFactory(domain.BookingFactoryConfig{
+		MinStartLeadTime: m.config.Appointment.MinStartLeadTime,
+		MaxStartLeadTime: m.config.Appointment.MaxStartLeadTime,
+		ReservationTTL:   m.config.Appointment.ReservationTTL,
+	})
 	appointmentRepo := db.NewAppointmentRepository(m.pgxDb)
 	reservationReadModel := db.NewReservationReadModel(m.pgxDb)
 	services := app.NewService(
 		bookingFactory,
 		appointmentRepo,
+		m.catalogService,
+		m.workforceService,
 	)
 
 	m.handlers = httpPort.NewHandlers(services, reservationReadModel)

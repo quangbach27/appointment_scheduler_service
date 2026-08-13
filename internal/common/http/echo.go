@@ -31,7 +31,7 @@ func NewEcho(appConfig *config.AppConfig) *echo.Echo {
 		e.Server.IdleTimeout = 60 * time.Second
 	}
 
-	e.GET("/health", func(c echo.Context) error {
+	e.GET("/healthz", func(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
 

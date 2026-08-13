@@ -11,6 +11,25 @@ import (
 	"scheduler/internal/appointments/domain"
 )
 
+const getVehicleByUUID = `-- name: GetVehicleByUUID :one
+SELECT vehicle_uuid, user_id, make_code, model_name, model_year, license_plate FROM appointments.vehicles
+WHERE vehicle_uuid = $1
+`
+
+func (q *Queries) GetVehicleByUUID(ctx context.Context, vehicleUuid domain.VehicleUUID) (AppointmentsVehicle, error) {
+	row := q.db.QueryRow(ctx, getVehicleByUUID, vehicleUuid)
+	var i AppointmentsVehicle
+	err := row.Scan(
+		&i.VehicleUuid,
+		&i.UserID,
+		&i.MakeCode,
+		&i.ModelName,
+		&i.ModelYear,
+		&i.LicensePlate,
+	)
+	return i, err
+}
+
 const upsertVehicle = `-- name: UpsertVehicle :exec
 INSERT INTO appointments.vehicles (vehicle_uuid, user_id, make_code, model_name, model_year, license_plate)
 VALUES ($1, $2, $3, $4, $5, $6)

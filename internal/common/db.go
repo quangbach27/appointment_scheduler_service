@@ -20,6 +20,14 @@ type Beginner interface {
 	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 }
 
+func UpdateInSerializableTx(
+	ctx context.Context,
+	db Beginner,
+	fn func(ctx context.Context, tx pgx.Tx) error,
+) error {
+	return updateInTxWithIsolation(ctx, db, pgx.Serializable, fn)
+}
+
 func UpdateInTx(
 	ctx context.Context,
 	db Beginner,

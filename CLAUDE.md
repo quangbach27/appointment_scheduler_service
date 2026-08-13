@@ -20,7 +20,7 @@ Run a single test: `go test ./internal/appointments/domain/... -run TestName -v`
 
 Local run: `make up` (docker compose services `scheduler-app` + `scheduler-db`), `make down`, `make up-clean` (wipes volumes). App listens on `PORT` (default `4000`); Postgres is exposed on `DB_PORT` (default `5432`).
 
-Pre-push hooks (`lefthook.yml`) shell out to `task test-unit`, `task lint`, `task fmt`
+Pre-push hooks (`lefthook.yml`) shell out to `make test-unit`, `make lint`, `make fmt`
 
 CI (`.github/workflows/commit-stage.yml`) runs golangci-lint, `make test`, `go build ./...`, then a container vulnerability scan and image publish on push to `main`.
 
@@ -54,3 +54,7 @@ Appointment domain rules — the two-phase booking lifecycle, state transitions,
 - Integration tests use the `integration` build tag and `.env.test`. Component tests (`tests/component/`) boot the real service against real Postgres on `:9090` and drive it through the generated OpenAPI client, never handlers or `app.Service` directly.
 - **The test database is long-lived and never truncated**, so every run must carve out its own data: component tests take a fresh future day per booking (`nextStart()`, valid only because `.env.test` widens `APPOINTMENT_MAX_START_LEAD_TIME_DAYS` — keep the two in step), and DB integration tests take unique technician/bay IDs and run serially, since concurrent SERIALIZABLE bookings on a small table just exhaust the retry budget.
 - Stub fixtures should make every interesting branch reachable deterministically — see `adapters/workforce`'s permanently-off dealerships.
+
+## Working with Claude
+
+- Stay inside the confirmed plan/task scope. If an unrelated pre-existing bug (e.g. one blocking a build) needs fixing along the way, stop and ask for confirmation before changing it rather than fixing it inline.

@@ -47,7 +47,7 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 }
 
 const getAppointmentByUUID = `-- name: GetAppointmentByUUID :one
-SELECT appointment_uuid, dealer_ship_id, service_bay_id, technician_id, user_id, service_type, vehicle_uuid, start_time, estimated_end_time, status FROM appointments.appointment
+SELECT appointment_uuid, dealer_ship_id, service_bay_id, technician_id, user_id, service_type, start_time, estimated_end_time, status, vehicle_uuid FROM appointments.appointment
 WHERE appointment_uuid = $1
 `
 
@@ -61,16 +61,16 @@ func (q *Queries) GetAppointmentByUUID(ctx context.Context, appointmentUuid doma
 		&i.TechnicianID,
 		&i.UserID,
 		&i.ServiceType,
-		&i.VehicleUuid,
 		&i.StartTime,
 		&i.EstimatedEndTime,
 		&i.Status,
+		&i.VehicleUuid,
 	)
 	return i, err
 }
 
 const getAppointmentByUUIDAndUserID = `-- name: GetAppointmentByUUIDAndUserID :one
-SELECT appointment_uuid, dealer_ship_id, service_bay_id, technician_id, user_id, service_type, vehicle_uuid, start_time, estimated_end_time, status FROM appointments.appointment
+SELECT appointment_uuid, dealer_ship_id, service_bay_id, technician_id, user_id, service_type, start_time, estimated_end_time, status, vehicle_uuid FROM appointments.appointment
 WHERE appointment_uuid = $1 AND user_id = $2
 `
 
@@ -89,12 +89,67 @@ func (q *Queries) GetAppointmentByUUIDAndUserID(ctx context.Context, arg GetAppo
 		&i.TechnicianID,
 		&i.UserID,
 		&i.ServiceType,
-		&i.VehicleUuid,
 		&i.StartTime,
 		&i.EstimatedEndTime,
 		&i.Status,
+		&i.VehicleUuid,
 	)
 	return i, err
+}
+
+const getBusyServiceBaysAndTechnicians = `-- name: GetBusyServiceBaysAndTechnicians :many
+SELECT DISTINCT
+    a.service_bay_id,
+    a.technician_id
+FROM appointments.appointment a
+LEFT JOIN appointments.reservation r
+    ON r.appointment_uuid = a.appointment_uuid
+WHERE
+    a.dealer_ship_id = $1
+    AND a.start_time < $2
+    AND a.estimated_end_time > $3
+    AND (
+        a.status = 'confirmed'
+        OR (a.status = 'pending' AND r.expired_at > now())
+    )
+`
+
+type GetBusyServiceBaysAndTechniciansParams struct {
+	DealerShipID string
+	EndTime      time.Time
+	StartTime    time.Time
+}
+
+type GetBusyServiceBaysAndTechniciansRow struct {
+	ServiceBayID string
+	TechnicianID string
+}
+
+// Returns the (service_bay_id, technician_id) pairs busy for the requested
+// window: busy if an overlapping appointment is confirmed, or pending with an
+// unexpired hold. Overlap is half-open, so back-to-back appointments don't
+// conflict.
+//
+// This read must run inside the booking transaction: at SERIALIZABLE it is
+// what creates the predicate lock SSI needs to detect two concurrent bookings.
+func (q *Queries) GetBusyServiceBaysAndTechnicians(ctx context.Context, arg GetBusyServiceBaysAndTechniciansParams) ([]GetBusyServiceBaysAndTechniciansRow, error) {
+	rows, err := q.db.Query(ctx, getBusyServiceBaysAndTechnicians, arg.DealerShipID, arg.EndTime, arg.StartTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetBusyServiceBaysAndTechniciansRow{}
+	for rows.Next() {
+		var i GetBusyServiceBaysAndTechniciansRow
+		if err := rows.Scan(&i.ServiceBayID, &i.TechnicianID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAppointmentStatus = `-- name: UpdateAppointmentStatus :exec

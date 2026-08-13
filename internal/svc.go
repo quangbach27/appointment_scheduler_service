@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"scheduler/internal/appointments"
+	appointmentsApp "scheduler/internal/appointments/app"
 	"scheduler/internal/common/config"
 	commonHttp "scheduler/internal/common/http"
 	"scheduler/internal/common/log"
@@ -19,7 +20,10 @@ import (
 	"scheduler/internal/common/module/contracts"
 )
 
-type ExternalService struct{}
+type ExternalService struct {
+	AppointmentCatalog   appointmentsApp.CatalogService
+	AppointmentWorkforce appointmentsApp.WorkforceService
+}
 
 type Svc struct {
 	config     *config.Config
@@ -44,7 +48,12 @@ func New(
 	moduleContracts := &contracts.Contracts{}
 
 	modules := []module.Module{
-		appointments.NewModule(config, pgxDb),
+		appointments.NewModule(
+			config,
+			pgxDb,
+			externalService.AppointmentCatalog,
+			externalService.AppointmentWorkforce,
+		),
 	}
 
 	for _, module := range modules {

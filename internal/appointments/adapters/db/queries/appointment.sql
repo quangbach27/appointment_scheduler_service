@@ -14,3 +14,27 @@ WHERE appointment_uuid = $1 AND user_id = $2;
 UPDATE appointments.appointment
 SET status = $2
 WHERE appointment_uuid = $1;
+
+-- Returns the (service_bay_id, technician_id) pairs busy for the requested
+-- window: busy if an overlapping appointment is confirmed, or pending with an
+-- unexpired hold. Overlap is half-open, so back-to-back appointments don't
+-- conflict.
+--
+-- This read must run inside the booking transaction: at SERIALIZABLE it is
+-- what creates the predicate lock SSI needs to detect two concurrent bookings.
+-- name: GetBusyServiceBaysAndTechnicians :many
+SELECT DISTINCT
+    a.service_bay_id,
+    a.technician_id
+FROM appointments.appointment a
+LEFT JOIN appointments.reservation r
+    ON r.appointment_uuid = a.appointment_uuid
+WHERE
+    a.dealer_ship_id = @dealer_ship_id
+    AND a.start_time < @end_time
+    AND a.estimated_end_time > @start_time
+    AND (
+        a.status = 'confirmed'
+        OR (a.status = 'pending' AND r.expired_at > now())
+    );
+

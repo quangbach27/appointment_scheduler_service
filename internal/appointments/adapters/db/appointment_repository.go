@@ -28,35 +28,83 @@ func NewAppointmentRepository(db *pgxpool.Pool) *AppointmentRepository {
 
 var _ domain.AppointmentRepository = (*AppointmentRepository)(nil)
 
+func (r *AppointmentRepository) FindReservationByIdempotencyKey(
+	ctx context.Context,
+	idempotencyKey string,
+) (domain.ReservationUUID, bool, error) {
+	existing, err := dbmodels.New(r.db).GetReservationByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ReservationUUID{}, false, nil
+		}
+		return domain.ReservationUUID{}, false, err
+	}
+
+	return existing.ReservationUuid, true, nil
+}
+
 func (r *AppointmentRepository) RequestAppointment(
 	ctx context.Context,
-	userID string,
-	vehicle *domain.Vehicle,
-	appointment *domain.Appointment,
-	reservation *domain.Reservation,
+	params domain.RequestAppointmentParams,
+	createFn func(
+		busyServiceBayIDs map[string]string,
+		busyTechnicianIDs map[string]string,
+	) (*domain.Appointment, *domain.Reservation, error),
 ) (domain.ReservationUUID, error) {
 	var result domain.ReservationUUID
 
-	err := common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
+	err := common.UpdateInSerializableTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
+		// Idempotency is resolved before availability: a replay must return its
+		// original reservation, not be told its own booking made the slot busy.
+		existing, err := q.GetReservationByIdempotencyKey(ctx, params.IdempotencyKey)
+		if err == nil {
+			result = existing.ReservationUuid
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+
+		busyRows, err := q.GetBusyServiceBaysAndTechnicians(ctx, dbmodels.GetBusyServiceBaysAndTechniciansParams{
+			DealerShipID: params.DealerShipID,
+			StartTime:    params.StartTime,
+			EndTime:      params.EndTime,
+		})
+		if err != nil {
+			return err
+		}
+
+		busyServiceBayIDs := make(map[string]string, len(busyRows))
+		busyTechnicianIDs := make(map[string]string, len(busyRows))
+		for _, row := range busyRows {
+			busyServiceBayIDs[row.ServiceBayID] = row.TechnicianID
+			busyTechnicianIDs[row.TechnicianID] = row.ServiceBayID
+		}
+
+		appointment, reservation, err := createFn(busyServiceBayIDs, busyTechnicianIDs)
+		if err != nil {
+			return err
+		}
+		details := appointment.Details()
+
 		var licensePlate *string
-		if lp := vehicle.LicensePlate(); lp != "" {
+		if lp := params.Vehicle.LicensePlate(); lp != "" {
 			licensePlate = &lp
 		}
 
 		if err := q.UpsertVehicle(ctx, dbmodels.UpsertVehicleParams{
-			VehicleUuid:  vehicle.UUID(),
-			UserID:       userID,
-			MakeCode:     vehicle.MakeCode(),
-			ModelName:    vehicle.ModelName(),
-			ModelYear:    int16(vehicle.ModelYear()),
+			VehicleUuid:  params.Vehicle.UUID(),
+			UserID:       params.UserID,
+			MakeCode:     params.Vehicle.MakeCode(),
+			ModelName:    params.Vehicle.ModelName(),
+			ModelYear:    int16(params.Vehicle.ModelYear()),
 			LicensePlate: licensePlate,
 		}); err != nil {
 			return err
 		}
 
-		details := appointment.Details()
 		if err := q.CreateAppointment(ctx, dbmodels.CreateAppointmentParams{
 			AppointmentUuid:  appointment.UUID(),
 			DealerShipID:     details.DealerShipID(),
@@ -72,23 +120,23 @@ func (r *AppointmentRepository) RequestAppointment(
 			return err
 		}
 
-		created, err := q.CreateReservation(ctx, dbmodels.CreateReservationParams{
+		if err := q.CreateReservation(ctx, dbmodels.CreateReservationParams{
 			ReservationUuid: reservation.UUID(),
 			AppointmentUuid: reservation.AppointmentUUID(),
 			CreatedAt:       reservation.CreatedAt(),
 			ExpiredAt:       reservation.ExpiredAt(),
 			IdempotencyKey:  reservation.IdempotencyKey(),
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 
-		result = created.ReservationUuid
+		result = reservation.UUID()
 		return nil
 	})
 	if err != nil {
+		// Backstop for two identical requests racing past the in-tx lookup above.
 		if common.IsUniqueViolationError(err, uniqueReservationIdempotencyKeyConstraint) {
-			existing, getErr := dbmodels.New(r.db).GetReservationByIdempotencyKey(ctx, reservation.IdempotencyKey())
+			existing, getErr := dbmodels.New(r.db).GetReservationByIdempotencyKey(ctx, params.IdempotencyKey)
 			if getErr != nil {
 				return domain.ReservationUUID{}, getErr
 			}
