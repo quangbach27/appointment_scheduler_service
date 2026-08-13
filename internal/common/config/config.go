@@ -77,12 +77,12 @@ func newAppConfig() *AppConfig {
 }
 
 func newAppointmentConfig() *AppointmentConfig {
-	reservationTTLMinutes := getIntEnv("APPOINTMENT_RESERVATION_TTL_MINUTES", 5)
+	reservationTTLSeconds := getIntEnv("APPOINTMENT_RESERVATION_TTL_SECONDS", 300)
 	minStartLeadTimeHours := getIntEnv("APPOINTMENT_MIN_START_LEAD_TIME_HOURS", 1)
 	maxStartLeadTimeDays := getIntEnv("APPOINTMENT_MAX_START_LEAD_TIME_DAYS", 30)
 
 	return &AppointmentConfig{
-		ReservationTTL:   time.Duration(reservationTTLMinutes) * time.Minute,
+		ReservationTTL:   time.Duration(reservationTTLSeconds) * time.Second,
 		MinStartLeadTime: time.Duration(minStartLeadTimeHours) * time.Hour,
 		MaxStartLeadTime: time.Duration(maxStartLeadTimeDays) * 24 * time.Hour,
 	}
