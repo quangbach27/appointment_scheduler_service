@@ -50,7 +50,9 @@ func TestAppointment_Cancel_WhenInPast_ReturnsError(t *testing.T) {
 
 	err := appointment.Cancel()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "appointment is in the past")
+	var domainErr common.Error
+	require.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "appointment-in-the-past", domainErr.ErrorSlug)
 	assert.False(t, appointment.IsCancelled())
 }
 
@@ -263,5 +265,7 @@ func TestAppointment_Cancel_WhenAlreadyCancelled_ReturnsError(t *testing.T) {
 
 	err := appointment.Cancel()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "appointment is already cancelled")
+	var domainErr common.Error
+	require.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "appointment-already-cancelled", domainErr.ErrorSlug)
 }

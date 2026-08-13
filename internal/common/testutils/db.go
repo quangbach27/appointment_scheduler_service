@@ -3,11 +3,17 @@ package testutils
 import (
 	"context"
 	"io/fs"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"scheduler/internal/common"
 	"scheduler/internal/common/config"
+)
+
+var (
+	dbOnce sync.Once
+	dbPool *pgxpool.Pool
 )
 
 func RunMigrations(moduleName string, embedFS fs.FS, migrationsDir string) {
@@ -26,17 +32,21 @@ func RunMigrations(moduleName string, embedFS fs.FS, migrationsDir string) {
 }
 
 func NewDB() *pgxpool.Pool {
-	dbCfg := config.NewConfig().DB
+	dbOnce.Do(func() {
+		dbCfg := config.NewConfig().DB
 
-	config, err := pgxpool.ParseConfig(dbCfg.URL)
-	if err != nil {
-		panic(err)
-	}
+		poolConfig, err := pgxpool.ParseConfig(dbCfg.URL)
+		if err != nil {
+			panic(err)
+		}
 
-	pool, err := pgxpool.NewWithConfig(context.Background(), config)
-	if err != nil {
-		panic(err)
-	}
+		pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+		if err != nil {
+			panic(err)
+		}
 
-	return pool
+		dbPool = pool
+	})
+
+	return dbPool
 }

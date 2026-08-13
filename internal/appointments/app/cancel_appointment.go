@@ -1,9 +1,16 @@
 package app
 
-import "context"
+import (
+	"context"
 
-type CancelAppointment struct{}
+	"scheduler/internal/appointments/domain"
+)
+
+type CancelAppointment struct {
+	UserID          string
+	AppointmentUUID domain.AppointmentUUID
+}
 
 func (s *Service) CancelAppointment(ctx context.Context, cmd CancelAppointment) error {
-	return nil
+	return s.appointmentRepo.CancelAppointment(ctx, cmd.UserID, cmd.AppointmentUUID)
 }

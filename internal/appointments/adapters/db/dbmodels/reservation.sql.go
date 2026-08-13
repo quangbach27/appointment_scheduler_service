@@ -80,3 +80,59 @@ func (q *Queries) GetReservationByUUID(ctx context.Context, reservationUuid doma
 	)
 	return i, err
 }
+
+const getReservationWithAppointmentByUUID = `-- name: GetReservationWithAppointmentByUUID :one
+SELECT
+    r.reservation_uuid,
+    r.expired_at,
+    a.appointment_uuid,
+    a.status,
+    a.dealer_ship_id,
+    a.service_bay_id,
+    a.technician_id,
+    a.service_type,
+    a.vehicle_uuid,
+    a.start_time,
+    a.estimated_end_time
+FROM appointments.reservation r
+JOIN appointments.appointment a ON a.appointment_uuid = r.appointment_uuid
+WHERE r.reservation_uuid = $1 AND a.user_id = $2
+`
+
+type GetReservationWithAppointmentByUUIDParams struct {
+	ReservationUuid domain.ReservationUUID
+	UserID          string
+}
+
+type GetReservationWithAppointmentByUUIDRow struct {
+	ReservationUuid  domain.ReservationUUID
+	ExpiredAt        time.Time
+	AppointmentUuid  domain.AppointmentUUID
+	Status           domain.AppointmentStatus
+	DealerShipID     string
+	ServiceBayID     string
+	TechnicianID     string
+	ServiceType      string
+	VehicleUuid      domain.VehicleUUID
+	StartTime        time.Time
+	EstimatedEndTime time.Time
+}
+
+func (q *Queries) GetReservationWithAppointmentByUUID(ctx context.Context, arg GetReservationWithAppointmentByUUIDParams) (GetReservationWithAppointmentByUUIDRow, error) {
+	row := q.db.QueryRow(ctx, getReservationWithAppointmentByUUID, arg.ReservationUuid, arg.UserID)
+	var i GetReservationWithAppointmentByUUIDRow
+	err := row.Scan(
+		&i.ReservationUuid,
+		&i.ExpiredAt,
+		&i.AppointmentUuid,
+		&i.Status,
+		&i.DealerShipID,
+		&i.ServiceBayID,
+		&i.TechnicianID,
+		&i.ServiceType,
+		&i.VehicleUuid,
+		&i.StartTime,
+		&i.EstimatedEndTime,
+	)
+	return i, err
+}

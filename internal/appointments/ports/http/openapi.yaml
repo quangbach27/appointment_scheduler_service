@@ -12,8 +12,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            format: uuid
+            $ref: '#/components/schemas/ReservationUUID'
         - name: X-User-Id
           in: header
           required: true
@@ -62,6 +61,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reservations/{reservationUuid}:
+    get:
+      operationId: getReservation
+      summary: Get a reservation together with its appointment
+      parameters:
+        - name: reservationUuid
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ReservationUUID'
+        - name: X-User-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reservation found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetReservationResponse'
+        '401':
+          description: X-User-Id header is missing or empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Reservation not found (or not owned by the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /appointments/{appointmentUuid}/cancel:
+    post:
+      operationId: cancelAppointment
+      summary: Cancel a confirmed appointment
+      parameters:
+        - name: appointmentUuid
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/AppointmentUUID'
+        - name: X-User-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Appointment cancelled
+        '400':
+          description: Appointment start time has already passed (appointment-in-the-past)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: X-User-Id header is missing or empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Appointment not found (or not owned by the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Appointment is not confirmed, or already cancelled (appointment-not-confirmed / appointment-already-cancelled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ConfirmAppointmentResponse:
@@ -69,11 +156,70 @@ components:
       required: [appointmentUuid, status]
       properties:
         appointmentUuid:
+          $ref: '#/components/schemas/AppointmentUUID'
+    AppointmentUUID:
+      type: string
+      format: uuid
+      description: UUID of the appointment
+      x-go-type: domain.AppointmentUUID
+      x-go-type-import:
+        path: scheduler/internal/appointments/domain
+    ReservationUUID:
+      type: string
+      format: uuid
+      description: UUID of the reservation
+      x-go-type: domain.ReservationUUID
+      x-go-type-import:
+        path: scheduler/internal/appointments/domain
+    AppointmentStatus:
+      type: string
+      enum: [pending, confirmed, cancelled]
+      description: Status of the appointment
+      x-go-type: domain.AppointmentStatus
+      x-go-type-import:
+        path: scheduler/internal/appointments/domain
+    VehicleUUID:
+      type: string
+      format: uuid
+      description: UUID of the vehicle
+      x-go-type: domain.VehicleUUID
+      x-go-type-import:
+        path: scheduler/internal/appointments/domain
+    GetReservationResponse:
+      type: object
+      required: [reservationUuid, expiredAt, appointment]
+      properties:
+        reservationUuid:
+          $ref: '#/components/schemas/ReservationUUID'
+        expiredAt:
           type: string
-          format: uuid
+          format: date-time
+        appointment:
+          $ref: '#/components/schemas/AppointmentDetailResponse'
+    AppointmentDetailResponse:
+      type: object
+      required: [appointmentUuid, status, dealerShipId, serviceBayId, technicianId, serviceType, vehicleUuid, startTime, estimatedEndTime]
+      properties:
+        appointmentUuid:
+          $ref: '#/components/schemas/AppointmentUUID'
         status:
+          $ref: '#/components/schemas/AppointmentStatus'
+        dealerShipId:
           type: string
-          enum: [pending, confirmed, cancelled]
+        serviceBayId:
+          type: string
+        technicianId:
+          type: string
+        serviceType:
+          type: string
+        vehicleUuid:
+          $ref: '#/components/schemas/VehicleUUID'
+        startTime:
+          type: string
+          format: date-time
+        estimatedEndTime:
+          type: string
+          format: date-time
     ErrorResponse:
       type: object
       required: [slug, message]

@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"scheduler/internal/common"
@@ -79,7 +78,7 @@ func (a *Appointment) Confirm(reservation *Reservation) error {
 
 func (a *Appointment) Cancel() error {
 	if a.IsCancelled() {
-		return errors.New("appointment is already cancelled")
+		return common.NewConflictError("appointment-already-cancelled", "appointment is already cancelled")
 	}
 
 	if a.status != AppointmentStatusConfirmed {
@@ -87,7 +86,7 @@ func (a *Appointment) Cancel() error {
 	}
 
 	if a.details.startTime.Before(time.Now()) {
-		return errors.New("appointment is in the past")
+		return common.NewInvalidInputError("appointment-in-the-past", "appointment is in the past")
 	}
 
 	a.status = AppointmentStatusCanceled

@@ -15,7 +15,6 @@ type Service struct {
 func NewService(
 	bookingFactory *domain.BookingFactory,
 	appointmentRepo domain.AppointmentRepository,
-	catalogService CatalogService,
 ) *Service {
 	if bookingFactory == nil {
 		panic("bookingFactory can't be nil")
@@ -25,13 +24,8 @@ func NewService(
 		panic("appointmentRepo can't be nil")
 	}
 
-	if catalogService == nil {
-		panic("catalogService can't be nil")
-	}
-
 	return &Service{
 		bookingFactory:  bookingFactory,
-		catalogService:  catalogService,
 		appointmentRepo: appointmentRepo,
 	}
 }

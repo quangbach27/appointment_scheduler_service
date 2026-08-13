@@ -6,6 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"scheduler/internal/appointments/adapters/db"
+	"scheduler/internal/appointments/app"
+	"scheduler/internal/appointments/domain"
 	httpPort "scheduler/internal/appointments/ports/http"
 	"scheduler/internal/common"
 	"scheduler/internal/common/config"
@@ -22,6 +25,10 @@ func NewModule(
 	config *config.Config,
 	pgxDb *pgxpool.Pool,
 ) *Module {
+	if config == nil {
+		panic("config can't be nil")
+	}
+
 	if pgxDb == nil {
 		panic("db can't be nil")
 	}
@@ -50,7 +57,15 @@ func (m *Module) Init(ctx context.Context) error {
 		return err
 	}
 
-	m.handlers = httpPort.NewHandlers(nil)
+	bookingFactory := domain.NewBookingFactory(domain.BookingFactoryConfig{})
+	appointmentRepo := db.NewAppointmentRepository(m.pgxDb)
+	reservationReadModel := db.NewReservationReadModel(m.pgxDb)
+	services := app.NewService(
+		bookingFactory,
+		appointmentRepo,
+	)
+
+	m.handlers = httpPort.NewHandlers(services, reservationReadModel)
 	return nil
 }
 
@@ -58,9 +73,6 @@ func (m *Module) RegisterContracts(ctx context.Context, contracts *contracts.Con
 	return nil
 }
 
-func (m *Module) RegisterHttp(
-	ctx context.Context,
-	router common.EchoRouter,
-) error {
+func (m *Module) RegisterHttp(ctx context.Context, router common.EchoRouter) error {
 	return httpPort.Register(router, m.handlers)
 }

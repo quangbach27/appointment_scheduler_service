@@ -9,41 +9,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
+	"scheduler/internal/appointments/domain"
 
 	"github.com/labstack/echo/v4"
 	"github.com/oapi-codegen/runtime"
-	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
-// Defines values for ConfirmAppointmentResponseStatus.
-const (
-	Cancelled ConfirmAppointmentResponseStatus = "cancelled"
-	Confirmed ConfirmAppointmentResponseStatus = "confirmed"
-	Pending   ConfirmAppointmentResponseStatus = "pending"
-)
+// AppointmentDetailResponse defines model for AppointmentDetailResponse.
+type AppointmentDetailResponse struct {
+	// AppointmentUuid UUID of the appointment
+	AppointmentUuid  AppointmentUUID `json:"appointmentUuid"`
+	DealerShipId     string          `json:"dealerShipId"`
+	EstimatedEndTime time.Time       `json:"estimatedEndTime"`
+	ServiceBayId     string          `json:"serviceBayId"`
+	ServiceType      string          `json:"serviceType"`
+	StartTime        time.Time       `json:"startTime"`
 
-// Valid indicates whether the value is a known member of the ConfirmAppointmentResponseStatus enum.
-func (e ConfirmAppointmentResponseStatus) Valid() bool {
-	switch e {
-	case Cancelled:
-		return true
-	case Confirmed:
-		return true
-	case Pending:
-		return true
-	default:
-		return false
-	}
+	// Status Status of the appointment
+	Status       AppointmentStatus `json:"status"`
+	TechnicianId string            `json:"technicianId"`
+
+	// VehicleUuid UUID of the vehicle
+	VehicleUuid VehicleUUID `json:"vehicleUuid"`
 }
+
+// AppointmentStatus Status of the appointment
+type AppointmentStatus = domain.AppointmentStatus
+
+// AppointmentUUID UUID of the appointment
+type AppointmentUUID = domain.AppointmentUUID
 
 // ConfirmAppointmentResponse defines model for ConfirmAppointmentResponse.
 type ConfirmAppointmentResponse struct {
-	AppointmentUuid openapi_types.UUID               `json:"appointmentUuid"`
-	Status          ConfirmAppointmentResponseStatus `json:"status"`
+	// AppointmentUuid UUID of the appointment
+	AppointmentUuid AppointmentUUID `json:"appointmentUuid"`
 }
-
-// ConfirmAppointmentResponseStatus defines model for ConfirmAppointmentResponse.Status.
-type ConfirmAppointmentResponseStatus string
 
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
@@ -60,6 +62,31 @@ type ErrorResponse struct {
 	Slug    string         `json:"slug"`
 }
 
+// GetReservationResponse defines model for GetReservationResponse.
+type GetReservationResponse struct {
+	Appointment AppointmentDetailResponse `json:"appointment"`
+	ExpiredAt   time.Time                 `json:"expiredAt"`
+
+	// ReservationUuid UUID of the reservation
+	ReservationUuid ReservationUUID `json:"reservationUuid"`
+}
+
+// ReservationUUID UUID of the reservation
+type ReservationUUID = domain.ReservationUUID
+
+// VehicleUUID UUID of the vehicle
+type VehicleUUID = domain.VehicleUUID
+
+// CancelAppointmentParams defines parameters for CancelAppointment.
+type CancelAppointmentParams struct {
+	XUserId string `json:"X-User-Id"`
+}
+
+// GetReservationParams defines parameters for GetReservation.
+type GetReservationParams struct {
+	XUserId string `json:"X-User-Id"`
+}
+
 // ConfirmAppointmentParams defines parameters for ConfirmAppointment.
 type ConfirmAppointmentParams struct {
 	XUserId string `json:"X-User-Id"`
@@ -67,9 +94,15 @@ type ConfirmAppointmentParams struct {
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// CancelAppointment Cancel a confirmed appointment
+	// (POST /appointments/{appointmentUuid}/cancel)
+	CancelAppointment(ctx echo.Context, appointmentUuid AppointmentUUID, params CancelAppointmentParams) error
+	// GetReservation Get a reservation together with its appointment
+	// (GET /reservations/{reservationUuid})
+	GetReservation(ctx echo.Context, reservationUuid ReservationUUID, params GetReservationParams) error
 	// ConfirmAppointment Confirm a pending appointment using its reservation
 	// (POST /reservations/{reservationUuid}/confirm)
-	ConfirmAppointment(ctx echo.Context, reservationUuid openapi_types.UUID, params ConfirmAppointmentParams) error
+	ConfirmAppointment(ctx echo.Context, reservationUuid ReservationUUID, params ConfirmAppointmentParams) error
 }
 
 // ServerInterfaceWrapper converts echo contexts to parameters.
@@ -77,11 +110,87 @@ type ServerInterfaceWrapper struct {
 	Handler ServerInterface
 }
 
+// CancelAppointment converts echo context to params.
+func (w *ServerInterfaceWrapper) CancelAppointment(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "appointmentUuid" -------------
+	var appointmentUuid AppointmentUUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "appointmentUuid", ctx.Param("appointmentUuid"), &appointmentUuid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter appointmentUuid: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CancelAppointmentParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "X-User-Id" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
+		var XUserId string
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
+		}
+
+		params.XUserId = XUserId
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter X-User-Id is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.CancelAppointment(ctx, appointmentUuid, params)
+	return err
+}
+
+// GetReservation converts echo context to params.
+func (w *ServerInterfaceWrapper) GetReservation(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "reservationUuid" -------------
+	var reservationUuid ReservationUUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "reservationUuid", ctx.Param("reservationUuid"), &reservationUuid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter reservationUuid: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetReservationParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "X-User-Id" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-User-Id")]; found {
+		var XUserId string
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for X-User-Id, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-User-Id", valueList[0], &XUserId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter X-User-Id: %s", err))
+		}
+
+		params.XUserId = XUserId
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter X-User-Id is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetReservation(ctx, reservationUuid, params)
+	return err
+}
+
 // ConfirmAppointment converts echo context to params.
 func (w *ServerInterfaceWrapper) ConfirmAppointment(ctx echo.Context) error {
 	var err error
 	// ------------- Path parameter "reservationUuid" -------------
-	var reservationUuid openapi_types.UUID
+	var reservationUuid ReservationUUID
 
 	err = runtime.BindStyledParameterWithOptions("simple", "reservationUuid", ctx.Param("reservationUuid"), &reservationUuid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
 	if err != nil {
@@ -163,11 +272,171 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	}
 
 	router.POST(options.BaseURL+"/reservations/:reservationUuid/confirm", wrapper.ConfirmAppointment, options.OperationMiddlewares["confirmAppointment"]...)
+	router.GET(options.BaseURL+"/reservations/:reservationUuid", wrapper.GetReservation, options.OperationMiddlewares["getReservation"]...)
+	router.POST(options.BaseURL+"/appointments/:appointmentUuid/cancel", wrapper.CancelAppointment, options.OperationMiddlewares["cancelAppointment"]...)
 
 }
 
+type CancelAppointmentRequestObject struct {
+	AppointmentUuid AppointmentUUID `json:"appointmentUuid"`
+	Params          CancelAppointmentParams
+}
+
+type CancelAppointmentResponseObject interface {
+	VisitCancelAppointmentResponse(w http.ResponseWriter) error
+}
+
+type CancelAppointment204Response struct {
+}
+
+func (response CancelAppointment204Response) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type CancelAppointment400JSONResponse ErrorResponse
+
+func (response CancelAppointment400JSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointment401JSONResponse ErrorResponse
+
+func (response CancelAppointment401JSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointment404JSONResponse ErrorResponse
+
+func (response CancelAppointment404JSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointment409JSONResponse ErrorResponse
+
+func (response CancelAppointment409JSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointmentdefaultJSONResponse struct {
+	Body       ErrorResponse
+	StatusCode int
+}
+
+func (response CancelAppointmentdefaultJSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReservationRequestObject struct {
+	ReservationUuid ReservationUUID `json:"reservationUuid"`
+	Params          GetReservationParams
+}
+
+type GetReservationResponseObject interface {
+	VisitGetReservationResponse(w http.ResponseWriter) error
+}
+
+type GetReservation200JSONResponse GetReservationResponse
+
+func (response GetReservation200JSONResponse) VisitGetReservationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReservation401JSONResponse ErrorResponse
+
+func (response GetReservation401JSONResponse) VisitGetReservationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReservation404JSONResponse ErrorResponse
+
+func (response GetReservation404JSONResponse) VisitGetReservationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReservationdefaultJSONResponse struct {
+	Body       ErrorResponse
+	StatusCode int
+}
+
+func (response GetReservationdefaultJSONResponse) VisitGetReservationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ConfirmAppointmentRequestObject struct {
-	ReservationUuid openapi_types.UUID `json:"reservationUuid"`
+	ReservationUuid ReservationUUID `json:"reservationUuid"`
 	Params          ConfirmAppointmentParams
 }
 
@@ -278,6 +547,12 @@ func (response ConfirmAppointmentdefaultJSONResponse) VisitConfirmAppointmentRes
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// CancelAppointment Cancel a confirmed appointment
+	// (POST /appointments/{appointmentUuid}/cancel)
+	CancelAppointment(ctx context.Context, request CancelAppointmentRequestObject) (CancelAppointmentResponseObject, error)
+	// GetReservation Get a reservation together with its appointment
+	// (GET /reservations/{reservationUuid})
+	GetReservation(ctx context.Context, request GetReservationRequestObject) (GetReservationResponseObject, error)
 	// ConfirmAppointment Confirm a pending appointment using its reservation
 	// (POST /reservations/{reservationUuid}/confirm)
 	ConfirmAppointment(ctx context.Context, request ConfirmAppointmentRequestObject) (ConfirmAppointmentResponseObject, error)
@@ -295,8 +570,60 @@ type strictHandler struct {
 	middlewares []StrictMiddlewareFunc
 }
 
+// CancelAppointment operation middleware
+func (sh *strictHandler) CancelAppointment(ctx echo.Context, appointmentUuid AppointmentUUID, params CancelAppointmentParams) error {
+	var request CancelAppointmentRequestObject
+
+	request.AppointmentUuid = appointmentUuid
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelAppointment(ctx.Request().Context(), request.(CancelAppointmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelAppointment")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(CancelAppointmentResponseObject); ok {
+		return validResponse.VisitCancelAppointmentResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetReservation operation middleware
+func (sh *strictHandler) GetReservation(ctx echo.Context, reservationUuid ReservationUUID, params GetReservationParams) error {
+	var request GetReservationRequestObject
+
+	request.ReservationUuid = reservationUuid
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReservation(ctx.Request().Context(), request.(GetReservationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReservation")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetReservationResponseObject); ok {
+		return validResponse.VisitGetReservationResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // ConfirmAppointment operation middleware
-func (sh *strictHandler) ConfirmAppointment(ctx echo.Context, reservationUuid openapi_types.UUID, params ConfirmAppointmentParams) error {
+func (sh *strictHandler) ConfirmAppointment(ctx echo.Context, reservationUuid ReservationUUID, params ConfirmAppointmentParams) error {
 	var request ConfirmAppointmentRequestObject
 
 	request.ReservationUuid = reservationUuid

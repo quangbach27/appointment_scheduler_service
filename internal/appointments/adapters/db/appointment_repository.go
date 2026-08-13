@@ -15,15 +15,15 @@ import (
 const uniqueReservationIdempotencyKeyConstraint = "uq_reservation_idempotency_key"
 
 type AppointmentRepository struct {
-	pool *pgxpool.Pool
+	db *pgxpool.Pool
 }
 
-func NewAppointmentRepository(pool *pgxpool.Pool) *AppointmentRepository {
-	if pool == nil {
+func NewAppointmentRepository(db *pgxpool.Pool) *AppointmentRepository {
+	if db == nil {
 		panic("pool can't be nil")
 	}
 
-	return &AppointmentRepository{pool: pool}
+	return &AppointmentRepository{db: db}
 }
 
 var _ domain.AppointmentRepository = (*AppointmentRepository)(nil)
@@ -37,7 +37,7 @@ func (r *AppointmentRepository) RequestAppointment(
 ) (domain.ReservationUUID, error) {
 	var result domain.ReservationUUID
 
-	err := common.UpdateInTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+	err := common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
 		var licensePlate *string
@@ -88,7 +88,7 @@ func (r *AppointmentRepository) RequestAppointment(
 	})
 	if err != nil {
 		if common.IsUniqueViolationError(err, uniqueReservationIdempotencyKeyConstraint) {
-			existing, getErr := dbmodels.New(r.pool).GetReservationByIdempotencyKey(ctx, reservation.IdempotencyKey())
+			existing, getErr := dbmodels.New(r.db).GetReservationByIdempotencyKey(ctx, reservation.IdempotencyKey())
 			if getErr != nil {
 				return domain.ReservationUUID{}, getErr
 			}
@@ -107,7 +107,7 @@ func (r *AppointmentRepository) ConfirmAppointment(
 ) (domain.AppointmentUUID, error) {
 	var appointmentUUID domain.AppointmentUUID
 
-	err := common.UpdateInTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+	err := common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
 		reservationRow, err := q.GetReservationByUUID(ctx, reservationUUID)
@@ -157,7 +157,7 @@ func (r *AppointmentRepository) CancelAppointment(
 	userID string,
 	uuid domain.AppointmentUUID,
 ) error {
-	return common.UpdateInTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+	return common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
 		appointmentRow, err := q.GetAppointmentByUUIDAndUserID(ctx, dbmodels.GetAppointmentByUUIDAndUserIDParams{

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,12 +37,21 @@ type DBConfig struct {
 	URL      string
 }
 
+var (
+	configOnce sync.Once
+	config     *Config
+)
+
 func NewConfig() *Config {
-	return &Config{
-		App:         newAppConfig(),
-		Appointment: newAppointmentConfig(),
-		DB:          newDBConfig(),
-	}
+	configOnce.Do(func() {
+		config = &Config{
+			App:         newAppConfig(),
+			Appointment: newAppointmentConfig(),
+			DB:          newDBConfig(),
+		}
+	})
+
+	return config
 }
 
 func newAppConfig() *AppConfig {
