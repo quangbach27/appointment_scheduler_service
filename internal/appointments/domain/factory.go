@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -10,92 +11,79 @@ import (
 var (
 	defaultReservationTTL   = 5 * time.Minute
 	defaultMinStartLeadTime = 1 * time.Hour
+	defaultMaxStartLeadTime = 30 * 24 * time.Hour
 )
 
 // BookingFactory constructs Appointment instances in the Pending state and the
-// Reservation tokens that guard them, enforcing minimum start-time lead time
-// and reservation TTL respectively.
+// Reservation tokens that guard them, enforcing the bookable start-time window
+// (minimum lead time to maximum lead time) and reservation TTL respectively.
 type BookingFactory struct {
-	minStartLeadTime time.Duration
-	reservationTTL   time.Duration
+	config BookingFactoryConfig
+	// minStartLeadTime time.Duration
+	// maxStartLeadTime time.Duration
+	// reservationTTL   time.Duration
 }
 
 type BookingFactoryConfig struct {
 	MinStartLeadTime time.Duration
+	MaxStartLeadTime time.Duration
 	ReservationTTL   time.Duration
 }
 
 func NewBookingFactory(config BookingFactoryConfig) *BookingFactory {
-	minStartLeadTime := config.MinStartLeadTime
-	if minStartLeadTime <= 0 {
-		minStartLeadTime = defaultMinStartLeadTime
+	if config.MinStartLeadTime <= 0 {
+		config.MinStartLeadTime = defaultMinStartLeadTime
 	}
 
-	reservationTTL := config.ReservationTTL
-	if reservationTTL <= 0 {
-		reservationTTL = defaultReservationTTL
+	if config.MaxStartLeadTime <= 0 {
+		config.MaxStartLeadTime = defaultMaxStartLeadTime
+	}
+
+	if config.ReservationTTL <= 0 {
+		config.ReservationTTL = defaultReservationTTL
 	}
 
 	return &BookingFactory{
-		minStartLeadTime: minStartLeadTime,
-		reservationTTL:   reservationTTL,
+		config: config,
 	}
 }
 
+// AppointmentData holds the fields known immediately after the idempotency
+// check, before any catalog or workforce call. TechnicianID and
+// ServiceBayID aren't part of it: those are only resolved from availability
+// inside createFn, and are supplied later via AppointmentBuilder.
 type AppointmentData struct {
 	DealerShipID string
-	ServiceBayID string
-	TechnicianID string
 	UserID       string
-
-	ServiceType string
-	VehicleUUID VehicleUUID
-
-	StartTime         time.Time
-	EstimatedDuration time.Duration
+	ServiceType  string
+	VehicleUUID  VehicleUUID
+	StartTime    time.Time
 }
 
-func (f *BookingFactory) CreateAppointment(data AppointmentData) (*Appointment, error) {
-	details, err := f.createAppointmentDetails(data)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Appointment{
-		uuid:    AppointmentUUID{UUID: common.NewUUIDv7()},
-		status:  AppointmentStatusPending,
-		details: details,
-	}, nil
+// AppointmentBuilder assembles an Appointment across the two points in
+// RequestBooking where its data becomes available: NewAppointmentBuilder
+// validates the caller-supplied fields up front, before any external call;
+// WithDuration is filled in once the catalog responds; WithTechnicianID and
+// WithServiceBayID are filled in from createFn once availability is
+// resolved, and Build validates and constructs the Appointment.
+type AppointmentBuilder struct {
+	data              AppointmentData
+	estimatedDuration time.Duration
+	technicianID      string
+	serviceBayID      string
 }
 
-func (f *BookingFactory) createAppointmentDetails(data AppointmentData) (AppointmentDetails, error) {
+// NewAppointmentBuilder validates DealerShipID, UserID, ServiceType, and
+// StartTime, and fails fast on bad input before any catalog or workforce
+// call is made.
+func (f *BookingFactory) NewAppointmentBuilder(ctx context.Context, data AppointmentData) (*AppointmentBuilder, error) {
 	errDetails := []common.ErrorDetails{}
-	now := time.Now()
-
 	if data.DealerShipID == "" {
 		errDetails = append(errDetails, common.ErrorDetails{
 			EntityType: "Appointment",
 			EntityID:   "dealerShipID",
 			ErrorSlug:  "required",
 			Message:    "dealerShipID is required",
-		})
-	}
-
-	if data.ServiceBayID == "" {
-		errDetails = append(errDetails, common.ErrorDetails{
-			EntityType: "Appointment",
-			EntityID:   "serviceBayID",
-			ErrorSlug:  "required",
-			Message:    "serviceBayID is required",
-		})
-	}
-
-	if data.TechnicianID == "" {
-		errDetails = append(errDetails, common.ErrorDetails{
-			EntityType: "Appointment",
-			EntityID:   "technicianID",
-			ErrorSlug:  "required",
-			Message:    "technicianID is required",
 		})
 	}
 
@@ -117,8 +105,61 @@ func (f *BookingFactory) createAppointmentDetails(data AppointmentData) (Appoint
 		})
 	}
 
-	estimatedDuration := data.EstimatedDuration
-	if estimatedDuration <= 0 {
+	if detail := f.startTimeErrorDetail(data.StartTime); detail != nil {
+		errDetails = append(errDetails, *detail)
+	}
+
+	if len(errDetails) > 0 {
+		return nil, common.NewInvalidInputError("invalid-appointment", "invalid appointment input").WithDetails(errDetails)
+	}
+
+	return &AppointmentBuilder{data: data}, nil
+}
+
+// WithDuration sets the estimated duration, known once the catalog lookup
+// returns.
+func (b *AppointmentBuilder) WithDuration(estimatedDuration time.Duration) *AppointmentBuilder {
+	b.estimatedDuration = estimatedDuration
+	return b
+}
+
+// WithTechnicianID sets the technician resolved from availability inside
+// createFn.
+func (b *AppointmentBuilder) WithTechnicianID(technicianID string) *AppointmentBuilder {
+	b.technicianID = technicianID
+	return b
+}
+
+// WithServiceBayID sets the service bay resolved from availability inside
+// createFn.
+func (b *AppointmentBuilder) WithServiceBayID(serviceBayID string) *AppointmentBuilder {
+	b.serviceBayID = serviceBayID
+	return b
+}
+
+// Build validates the fields resolved after construction (duration,
+// technicianID, serviceBayID) and constructs the Appointment.
+func (b *AppointmentBuilder) Build() (*Appointment, error) {
+	errDetails := []common.ErrorDetails{}
+	if b.technicianID == "" {
+		errDetails = append(errDetails, common.ErrorDetails{
+			EntityType: "Appointment",
+			EntityID:   "technicianID",
+			ErrorSlug:  "required",
+			Message:    "technicianID is required",
+		})
+	}
+
+	if b.serviceBayID == "" {
+		errDetails = append(errDetails, common.ErrorDetails{
+			EntityType: "Appointment",
+			EntityID:   "serviceBayID",
+			ErrorSlug:  "required",
+			Message:    "serviceBayID is required",
+		})
+	}
+
+	if b.estimatedDuration <= 0 {
 		errDetails = append(errDetails, common.ErrorDetails{
 			EntityType: "Appointment",
 			EntityID:   "estimatedDuration",
@@ -127,36 +168,70 @@ func (f *BookingFactory) createAppointmentDetails(data AppointmentData) (Appoint
 		})
 	}
 
-	if data.StartTime.IsZero() {
-		errDetails = append(errDetails, common.ErrorDetails{
+	if len(errDetails) > 0 {
+		return nil, common.NewInvalidInputError("invalid-appointment", "invalid appointment input").WithDetails(errDetails)
+	}
+
+	return &Appointment{
+		uuid:   AppointmentUUID{UUID: common.NewUUIDv7()},
+		status: AppointmentStatusPending,
+		details: AppointmentDetails{
+			dealerShipID:     b.data.DealerShipID,
+			serviceBayID:     b.serviceBayID,
+			technicianID:     b.technicianID,
+			userID:           b.data.UserID,
+			serviceType:      b.data.ServiceType,
+			vehicleUUID:      b.data.VehicleUUID,
+			startTime:        b.data.StartTime,
+			estimatedEndTime: b.data.StartTime.Add(b.estimatedDuration),
+		},
+	}, nil
+}
+
+// ValidateStartTime reports whether a start time falls inside the bookable
+// window, so callers can reject early instead of after external lookups.
+// CreateAppointment applies the same rule, so the factory stays self-guarding.
+func (f *BookingFactory) ValidateStartTime(startTime time.Time) error {
+	detail := f.startTimeErrorDetail(startTime)
+	if detail == nil {
+		return nil
+	}
+
+	return common.NewInvalidInputError("invalid-appointment", "invalid appointment input").
+		WithDetails([]common.ErrorDetails{*detail})
+}
+
+// startTimeErrorDetail is the single definition of the bookable-window rule:
+// a start time must be present, no sooner than the minimum lead time, and no
+// further out than the maximum lead time.
+func (f *BookingFactory) startTimeErrorDetail(startTime time.Time) *common.ErrorDetails {
+	now := time.Now()
+
+	switch {
+	case startTime.IsZero():
+		return &common.ErrorDetails{
 			EntityType: "Appointment",
 			EntityID:   "startTime",
 			ErrorSlug:  "required",
 			Message:    "startTime is required",
-		})
-	} else if data.StartTime.Before(now.Add(f.minStartLeadTime)) {
-		errDetails = append(errDetails, common.ErrorDetails{
+		}
+	case startTime.Before(now.Add(f.config.MinStartLeadTime)):
+		return &common.ErrorDetails{
 			EntityType: "Appointment",
 			EntityID:   "startTime",
 			ErrorSlug:  "out-of-range",
 			Message:    "startTime must satisfy minimum lead time",
-		})
+		}
+	case startTime.After(now.Add(f.config.MaxStartLeadTime)):
+		return &common.ErrorDetails{
+			EntityType: "Appointment",
+			EntityID:   "startTime",
+			ErrorSlug:  "out-of-range",
+			Message:    "startTime must be within the booking window",
+		}
+	default:
+		return nil
 	}
-
-	if len(errDetails) > 0 {
-		return AppointmentDetails{}, common.NewInvalidInputError("invalid-appointment", "invalid appointment input").WithDetails(errDetails)
-	}
-
-	return AppointmentDetails{
-		dealerShipID:     data.DealerShipID,
-		serviceBayID:     data.ServiceBayID,
-		technicianID:     data.TechnicianID,
-		userID:           data.UserID,
-		serviceType:      data.ServiceType,
-		vehicleUUID:      data.VehicleUUID,
-		startTime:        data.StartTime,
-		estimatedEndTime: data.StartTime.Add(data.EstimatedDuration),
-	}, nil
 }
 
 func (f *BookingFactory) CreateReservation(appointmentUUID AppointmentUUID, idempotencyKey string) (*Reservation, error) {
@@ -170,7 +245,7 @@ func (f *BookingFactory) CreateReservation(appointmentUUID AppointmentUUID, idem
 		uuid:            ReservationUUID{UUID: common.NewUUIDv7()},
 		appointmentUUID: appointmentUUID,
 		createdAt:       now,
-		expiredAt:       now.Add(f.reservationTTL),
+		expiredAt:       now.Add(f.config.ReservationTTL),
 		idempotencyKey:  idempotencyKey,
 	}, nil
 }

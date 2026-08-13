@@ -1,14 +1,15 @@
 package domain_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"scheduler/internal/appointments/domain"
-	"scheduler/internal/common"
-
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
+
+	"scheduler/internal/appointments/domain"
+	"scheduler/internal/common"
 )
 
 func TestAppointmentFactory_CreateAppointment(t *testing.T) {
@@ -19,16 +20,20 @@ func TestAppointmentFactory_CreateAppointment(t *testing.T) {
 	})
 
 	startTime := time.Now().Add(3 * time.Hour)
-	appointment, err := factory.CreateAppointment(domain.AppointmentData{
-		DealerShipID:      "dealer-123",
-		ServiceBayID:      "bay-5",
-		TechnicianID:      "tech-9",
-		UserID:            "user-42",
-		ServiceType:       "oil-change",
-		VehicleUUID:       domain.VehicleUUID{UUID: common.NewUUIDv7()},
-		StartTime:         startTime,
-		EstimatedDuration: 45 * time.Minute,
+	builder, err := factory.NewAppointmentBuilder(context.Background(), domain.AppointmentData{
+		DealerShipID: "dealer-123",
+		UserID:       "user-42",
+		ServiceType:  "oil-change",
+		VehicleUUID:  domain.VehicleUUID{UUID: common.NewUUIDv7()},
+		StartTime:    startTime,
 	})
+	require.NoError(t, err)
+
+	appointment, err := builder.
+		WithDuration(45 * time.Minute).
+		WithTechnicianID("tech-9").
+		WithServiceBayID("bay-5").
+		Build()
 
 	require.NoError(t, err)
 	require.NotNil(t, appointment)
@@ -46,43 +51,70 @@ func TestAppointmentFactory_CreateAppointment(t *testing.T) {
 	assert.Equal(t, startTime.Add(45*time.Minute), details.EstimatedEndTime())
 }
 
-func TestAppointmentFactory_CreateAppointment_DefaultsAreApplied(t *testing.T) {
-	t.Parallel()
-
-	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{})
-
-	// default MinStartLeadTime is 1 hour; 30 minutes out should be rejected.
-	_, err := factory.CreateAppointment(domain.AppointmentData{
-		DealerShipID:      "dealer-123",
-		ServiceBayID:      "bay-5",
-		TechnicianID:      "tech-9",
-		UserID:            "user-42",
-		ServiceType:       "oil-change",
-		VehicleUUID:       domain.VehicleUUID{UUID: common.NewUUIDv7()},
-		StartTime:         time.Now().Add(30 * time.Minute),
-		EstimatedDuration: 30 * time.Minute,
-	})
-	require.Error(t, err)
-
-	appointment, err := factory.CreateAppointment(domain.AppointmentData{
-		DealerShipID:      "dealer-123",
-		ServiceBayID:      "bay-5",
-		TechnicianID:      "tech-9",
-		UserID:            "user-42",
-		ServiceType:       "oil-change",
-		VehicleUUID:       domain.VehicleUUID{UUID: common.NewUUIDv7()},
-		StartTime:         time.Now().Add(2 * time.Hour),
-		EstimatedDuration: 30 * time.Minute,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, appointment)
-}
-
-func TestAppointmentFactory_CreateAppointment_ValidationErrors(t *testing.T) {
+func TestBookingFactory_ValidateStartTime(t *testing.T) {
 	t.Parallel()
 
 	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{
 		MinStartLeadTime: 2 * time.Hour,
+		MaxStartLeadTime: 7 * 24 * time.Hour,
+	})
+
+	tests := []struct {
+		name        string
+		startTime   time.Time
+		expectError bool
+	}{
+		{
+			name:        "rejects zero start time",
+			startTime:   time.Time{},
+			expectError: true,
+		},
+		{
+			name:        "rejects start time before minimum lead time",
+			startTime:   time.Now().Add(time.Hour),
+			expectError: true,
+		},
+		{
+			name:      "accepts start time just past minimum lead time",
+			startTime: time.Now().Add(2*time.Hour + time.Minute),
+		},
+		{
+			name:      "accepts start time just inside the booking window",
+			startTime: time.Now().Add(7*24*time.Hour - time.Minute),
+		},
+		{
+			name:        "rejects start time past the booking window",
+			startTime:   time.Now().Add(7*24*time.Hour + time.Minute),
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := factory.ValidateStartTime(tt.startTime)
+			if !tt.expectError {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			var invalidErr common.Error
+			require.ErrorAs(t, err, &invalidErr)
+			assert.Equal(t, "invalid-appointment", invalidErr.ErrorSlug)
+			require.Len(t, invalidErr.Details, 1)
+			assert.Equal(t, "startTime", invalidErr.Details[0].EntityID)
+		})
+	}
+}
+
+func TestAppointmentFactory_NewAppointmentBuilder_ValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{
+		MinStartLeadTime: 2 * time.Hour,
+		MaxStartLeadTime: 7 * 24 * time.Hour,
 	})
 
 	tests := []struct {
@@ -93,39 +125,30 @@ func TestAppointmentFactory_CreateAppointment_ValidationErrors(t *testing.T) {
 		{
 			name: "rejects missing required fields",
 			data: domain.AppointmentData{
-				DealerShipID:      "",
-				ServiceBayID:      "",
-				TechnicianID:      "",
-				UserID:            "",
-				ServiceType:       "",
-				StartTime:         time.Now().Add(3 * time.Hour),
-				EstimatedDuration: 30 * time.Minute,
+				DealerShipID: "",
+				UserID:       "",
+				ServiceType:  "",
+				StartTime:    time.Now().Add(3 * time.Hour),
 			},
-			expectedSlugs: []string{"required", "required", "required", "required", "required"},
-		},
-		{
-			name: "rejects invalid duration",
-			data: domain.AppointmentData{
-				DealerShipID:      "dealer-123",
-				ServiceBayID:      "bay-5",
-				TechnicianID:      "tech-9",
-				UserID:            "user-42",
-				ServiceType:       "oil-change",
-				StartTime:         time.Now().Add(3 * time.Hour),
-				EstimatedDuration: 0,
-			},
-			expectedSlugs: []string{"out-of-range"},
+			expectedSlugs: []string{"required", "required", "required"},
 		},
 		{
 			name: "rejects start time before minimum lead time",
 			data: domain.AppointmentData{
-				DealerShipID:      "dealer-123",
-				ServiceBayID:      "bay-5",
-				TechnicianID:      "tech-9",
-				UserID:            "user-42",
-				ServiceType:       "oil-change",
-				StartTime:         time.Now().Add(30 * time.Minute),
-				EstimatedDuration: 30 * time.Minute,
+				DealerShipID: "dealer-123",
+				UserID:       "user-42",
+				ServiceType:  "oil-change",
+				StartTime:    time.Now().Add(30 * time.Minute),
+			},
+			expectedSlugs: []string{"out-of-range"},
+		},
+		{
+			name: "rejects start time beyond maximum lead time",
+			data: domain.AppointmentData{
+				DealerShipID: "dealer-123",
+				UserID:       "user-42",
+				ServiceType:  "oil-change",
+				StartTime:    time.Now().Add(8 * 24 * time.Hour),
 			},
 			expectedSlugs: []string{"out-of-range"},
 		},
@@ -135,7 +158,7 @@ func TestAppointmentFactory_CreateAppointment_ValidationErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := factory.CreateAppointment(tt.data)
+			_, err := factory.NewAppointmentBuilder(context.Background(), tt.data)
 			require.Error(t, err)
 			var invalidErr common.Error
 			require.ErrorAs(t, err, &invalidErr)
@@ -148,4 +171,101 @@ func TestAppointmentFactory_CreateAppointment_ValidationErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAppointmentBuilder_Build_ValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{
+		MinStartLeadTime: 2 * time.Hour,
+		MaxStartLeadTime: 7 * 24 * time.Hour,
+	})
+
+	newBuilder := func(t *testing.T) *domain.AppointmentBuilder {
+		t.Helper()
+
+		builder, err := factory.NewAppointmentBuilder(context.Background(), domain.AppointmentData{
+			DealerShipID: "dealer-123",
+			UserID:       "user-42",
+			ServiceType:  "oil-change",
+			StartTime:    time.Now().Add(3 * time.Hour),
+		})
+		require.NoError(t, err)
+		return builder
+	}
+
+	tests := []struct {
+		name          string
+		build         func(t *testing.T) (*domain.Appointment, error)
+		expectedSlugs []string
+	}{
+		{
+			name: "rejects missing technicianID and serviceBayID",
+			build: func(t *testing.T) (*domain.Appointment, error) {
+				return newBuilder(t).WithDuration(30 * time.Minute).Build()
+			},
+			expectedSlugs: []string{"required", "required"},
+		},
+		{
+			name: "rejects invalid duration",
+			build: func(t *testing.T) (*domain.Appointment, error) {
+				return newBuilder(t).
+					WithDuration(0).
+					WithTechnicianID("tech-9").
+					WithServiceBayID("bay-5").
+					Build()
+			},
+			expectedSlugs: []string{"out-of-range"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tt.build(t)
+			require.Error(t, err)
+			var invalidErr common.Error
+			require.ErrorAs(t, err, &invalidErr)
+			assert.Equal(t, "invalid-appointment", invalidErr.ErrorSlug)
+			assert.Equal(t, "invalid appointment input", invalidErr.PublicError)
+
+			require.Len(t, invalidErr.Details, len(tt.expectedSlugs))
+			for i, expectedSlug := range tt.expectedSlugs {
+				assert.Equal(t, expectedSlug, invalidErr.Details[i].ErrorSlug)
+			}
+		})
+	}
+}
+
+func TestFactory_CreateReservation(t *testing.T) {
+	t.Parallel()
+
+	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{
+		ReservationTTL: 10 * time.Minute,
+	})
+
+	appointmentUUID := domain.AppointmentUUID{UUID: common.NewUUIDv7()}
+	reservation, err := factory.CreateReservation(appointmentUUID, "idem-key-3")
+
+	require.NoError(t, err)
+	require.NotNil(t, reservation)
+	assert.Equal(t, appointmentUUID, reservation.AppointmentUUID())
+	assert.Equal(t, "idem-key-3", reservation.IdempotencyKey())
+	assert.False(t, reservation.IsExpired())
+	assert.WithinDuration(t, time.Now().Add(10*time.Minute), reservation.ExpiredAt(), 2*time.Second)
+}
+
+func TestFactory_CreateReservation_RequiresIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	factory := domain.NewBookingFactory(domain.BookingFactoryConfig{})
+
+	reservation, err := factory.CreateReservation(domain.AppointmentUUID{UUID: common.NewUUIDv7()}, "  ")
+	require.Error(t, err)
+	assert.Nil(t, reservation)
+
+	var domainErr common.Error
+	require.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, "invalid-reservation", domainErr.ErrorSlug)
 }
