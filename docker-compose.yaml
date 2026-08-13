@@ -24,8 +24,34 @@ services:
       DEBUG: "${DEBUG:-false}"
       GOCACHE: /app/go-cache
     depends_on:
-    - sumni-finance-db
+      scheduler-db:
+        condition: service_healthy
     # - keycloak
     networks:
-      - finance-app
-  
+      - scheduler-network
+
+  scheduler-db:
+    image: postgres:17-alpine
+    container_name: scheduler-db
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${DB_USERNAME:-user}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-password}"
+      POSTGRES_DB: "${DB_NAME:-scheduler_service}"
+    volumes:
+      - scheduler-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scheduler-network
+
+volumes:
+  scheduler-db-data:
+
+networks:
+  scheduler-network:
+

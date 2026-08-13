@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 
 	"scheduler/internal/common"
@@ -158,7 +159,11 @@ func (f *BookingFactory) createAppointmentDetails(data AppointmentData) (Appoint
 	}, nil
 }
 
-func (f *BookingFactory) CreateReservation(appointmentUUID AppointmentUUID) *Reservation {
+func (f *BookingFactory) CreateReservation(appointmentUUID AppointmentUUID, idempotencyKey string) (*Reservation, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return nil, common.NewInvalidInputError("invalid-reservation", "idempotencyKey is required")
+	}
+
 	now := time.Now()
 
 	return &Reservation{
@@ -166,5 +171,6 @@ func (f *BookingFactory) CreateReservation(appointmentUUID AppointmentUUID) *Res
 		appointmentUUID: appointmentUUID,
 		createdAt:       now,
 		expiredAt:       now.Add(f.reservationTTL),
-	}
+		idempotencyKey:  idempotencyKey,
+	}, nil
 }

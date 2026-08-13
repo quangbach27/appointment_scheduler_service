@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+  title: Appointments API
+  version: 1.0.0
+paths:
+  /reservations/{reservationUuid}/confirm:
+    post:
+      operationId: confirmAppointment
+      summary: Confirm a pending appointment using its reservation
+      parameters:
+        - name: reservationUuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-User-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Appointment confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmAppointmentResponse'
+        '400':
+          description: Reservation does not belong to the appointment it targets (reservation-mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: X-User-Id header is missing or empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Reservation or appointment not found (reservation-not-found / appointment-not-found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Appointment is no longer pending confirmation (appointment-not-pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Reservation has expired (reservation-expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    ConfirmAppointmentResponse:
+      type: object
+      required: [appointmentUuid, status]
+      properties:
+        appointmentUuid:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled]
+    ErrorResponse:
+      type: object
+      required: [slug, message]
+      properties:
+        message:
+          type: string
+        slug:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+    ErrorDetail:
+      type: object
+      properties:
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        error_slug:
+          type: string
+        message:
+          type: string

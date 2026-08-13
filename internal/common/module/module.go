@@ -13,7 +13,6 @@ type Module interface {
 	RegisterHttp(
 		ctx context.Context,
 		router common.EchoRouter,
-		protectedRouter common.EchoRouter,
 	) error
 	RegisterContracts(ctx context.Context, contracts *contracts.Contracts) error
 }

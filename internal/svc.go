@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
+
 	"scheduler/internal/common/config"
 	commonHttp "scheduler/internal/common/http"
 	"scheduler/internal/common/log"
 	"scheduler/internal/common/module"
 	"scheduler/internal/common/module/contracts"
-
-	"github.com/labstack/echo/v4"
-	"golang.org/x/sync/errgroup"
 )
 
 type ExternalService struct{}
@@ -63,7 +63,7 @@ func New(
 	}
 
 	for _, module := range modules {
-		err := module.RegisterHttp(ctx, router, router)
+		err := module.RegisterHttp(ctx, router)
 		if err != nil {
 			return Svc{}, fmt.Errorf("registering http for module %s failed: %w", module.Name(), err)
 		}

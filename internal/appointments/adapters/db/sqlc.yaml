@@ -1,0 +1,68 @@
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    queries: "queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "dbmodels"
+        out: "dbmodels"
+        sql_package: "pgx/v5"
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+
+          - db_type: "uuid"
+            nullable: false
+            go_type:
+              import: "scheduler/internal/common"
+              type: "UUID"
+
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: "scheduler/internal/common"
+              type: "UUID"
+              pointer: true
+
+          - column: "appointments.vehicles.vehicle_uuid"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "VehicleUUID"
+
+          - column: "appointments.appointment.appointment_uuid"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "AppointmentUUID"
+
+          - column: "appointments.appointment.vehicle_uuid"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "VehicleUUID"
+
+          - column: "appointments.appointment.status"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "AppointmentStatus"
+
+          - column: "appointments.reservation.reservation_uuid"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "ReservationUUID"
+
+          - column: "appointments.reservation.appointment_uuid"
+            go_type:
+              import: "scheduler/internal/appointments/domain"
+              type: "AppointmentUUID"

@@ -75,6 +75,7 @@ func TestAppointment_Confirm(t *testing.T) {
 		appointmentUUID,
 		time.Now(),
 		time.Now().Add(5*time.Minute),
+		"idem-key-1",
 	)
 
 	require.NoError(t, appointment.Confirm(reservation))
@@ -102,6 +103,7 @@ func TestAppointment_Confirm_WhenReservationExpired_ReturnsError(t *testing.T) {
 		appointmentUUID,
 		time.Now().Add(-10*time.Minute),
 		time.Now().Add(-1*time.Minute),
+		"idem-key-2",
 	)
 
 	err := appointment.Confirm(reservation)
@@ -132,6 +134,7 @@ func TestAppointment_Confirm_WhenReservationMismatched_ReturnsError(t *testing.T
 		domain.AppointmentUUID{UUID: common.NewUUIDv7()},
 		time.Now(),
 		time.Now().Add(5*time.Minute),
+		"idem-key-3",
 	)
 
 	err := appointment.Confirm(reservation)
@@ -162,6 +165,7 @@ func TestAppointment_Confirm_WhenNotPending_ReturnsError(t *testing.T) {
 		appointmentUUID,
 		time.Now(),
 		time.Now().Add(5*time.Minute),
+		"idem-key-4",
 	)
 
 	err := appointment.Confirm(reservation)

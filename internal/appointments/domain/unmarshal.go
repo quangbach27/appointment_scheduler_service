@@ -8,12 +8,14 @@ func UnmarshalReservation(
 	appointmentUUID AppointmentUUID,
 	createdAt time.Time,
 	expiredAt time.Time,
+	idempotencyKey string,
 ) *Reservation {
 	return &Reservation{
 		uuid:            uuid,
 		appointmentUUID: appointmentUUID,
 		createdAt:       createdAt,
 		expiredAt:       expiredAt,
+		idempotencyKey:  idempotencyKey,
 	}
 }
 

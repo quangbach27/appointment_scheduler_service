@@ -12,10 +12,10 @@ type AppointmentRepository interface {
 	RequestAppointment(
 		ctx context.Context,
 		userID string,
-		vehicle Vehicle,
+		vehicle *Vehicle,
 		appointment *Appointment,
 		reservation *Reservation,
-	) error
+	) (ReservationUUID, error)
 
 	ConfirmAppointment(
 		ctx context.Context,

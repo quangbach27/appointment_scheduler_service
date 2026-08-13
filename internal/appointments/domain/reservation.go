@@ -16,6 +16,8 @@ type Reservation struct {
 
 	createdAt time.Time
 	expiredAt time.Time
+
+	idempotencyKey string
 }
 
 func (r *Reservation) UUID() ReservationUUID {
@@ -36,4 +38,8 @@ func (r *Reservation) ExpiredAt() time.Time {
 
 func (r *Reservation) IsExpired() bool {
 	return !time.Now().Before(r.expiredAt)
+}
+
+func (r *Reservation) IdempotencyKey() string {
+	return r.idempotencyKey
 }
