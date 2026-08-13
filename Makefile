@@ -37,6 +37,7 @@ test-integration:
 ## Run component tests
 .PHONY: test-component
 test-component:
+	set -a && . ./.env.test && set +a && \
 	go test ./tests/... -count=1
 
 ## Run go generate

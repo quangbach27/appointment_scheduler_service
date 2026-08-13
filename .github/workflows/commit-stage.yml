@@ -25,20 +25,20 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    # services:
-    #   postgres:
-    #     image: postgres:17.6-alpine3.22
-    #     env:
-    #       POSTGRES_USER: user
-    #       POSTGRES_PASSWORD: password
-    #       POSTGRES_DB: sumni-finance
-    #     ports:
-    #       - 5432:5432
-    #     options: >-
-    #       --health-cmd "pg_isready -U user"
-    #       --health-interval 10s
-    #       --health-timeout 5s
-    #       --health-retries 5
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: scheduler_service
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d scheduler_service"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout source code
@@ -119,17 +119,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
   
-
-  
-  trigger-acceptance:
-    name: Trigger Acceptance Stage
-    needs: [package]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Dispatch to acceptance stage
-        uses: peter-evans/repository-dispatch@v4
-        with:
-          event-type: acceptance-stage
-          client-payload: '{"image_tag": "${{ github.sha }}"}'

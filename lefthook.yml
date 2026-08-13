@@ -1,8 +1,8 @@
 pre-push:
   commands:
     test-unit:
-      run: task test-unit
+      run: make test-unit
     lint:
-      run: task lint
+      run: make lint
     fmt:
-      run: task fmt
+      run: make fmt

@@ -1,29 +1,55 @@
 # internal/appointments/CLAUDE.md
 
-This supplements the root `CLAUDE.md` (which covers repo-wide commands, infra, and the generic bounded-context layout pattern) with specifics for the `appointments` bounded context.
+Specifics for the `appointments` context; the root `CLAUDE.md` covers repo-wide commands, infra, and the generic layout. Domain rules live only here.
 
-## Current wiring state
+## What a booking is
 
-- `module.go`'s `Init` constructs a real `domain.BookingFactory`, `adapters/db.AppointmentRepository` (backed by the injected `*pgxpool.Pool`), `adapters/db.ReservationReadModel`, and `app.Service`, then builds real `ports/http.Handlers` from it — the module is fully wired and `appointments.NewModule(config, pgxDb)` is in `internal/svc.go`'s module slice, so this context is mounted into the running server.
-- `ports/http.Register(router, handlers)` registers routes via the generated `RegisterHandlers`/`NewStrictHandler`.
-- `app.Service` (`app/service.go`) is built from `*domain.BookingFactory` and `domain.AppointmentRepository` only (the `CatalogService` port it used to also depend on was removed — `CatalogService`/`ServiceCatalogEntry` are still declared in `app/request_appointment.go` but currently unused).
-- Of the three use cases: `ConfirmAppointment` (`app/confirm_appointment.go`) and `CancelAppointment` (`app/cancel_appointment.go`) are implemented — both are pure delegation to the corresponding `AppointmentRepository` method, which already does the full load → domain transition (`appointment.Confirm(reservation)` / `appointment.Cancel()`) → persist flow. `RequestBooking` (`app/request_appointment.go`) is still a no-op stub.
-- `domain.AppointmentRepository` has a real Postgres implementation: `adapters/db/appointment_repository.go`.
-- `ports/http/openapi.yaml` defines three endpoints, all requiring `X-User-Id` as a header (no auth middleware exists yet anywhere in the codebase, so this is a stop-gap; a missing/empty header returns `401 missing-user-id`):
-  - `POST /reservations/{reservationUuid}/confirm` (`confirmAppointment`) — `400` reservation-mismatch, `404` reservation-not-found/appointment-not-found, `409` appointment-not-pending, `410` reservation-expired.
-  - `GET /reservations/{reservationUuid}` (`getReservation`) — returns the reservation joined with its appointment; `404` if not found or not owned by the caller.
-  - `POST /appointments/{appointmentUuid}/cancel` (`cancelAppointment`) — `204` on success; `400` appointment-in-the-past, `404` appointment-not-found, `409` appointment-not-confirmed/appointment-already-cancelled.
-  Path/response schemas (`AppointmentUUID`, `ReservationUUID`, `AppointmentStatus`, `VehicleUUID`) are `x-go-type`-bound directly to the domain types — see the root `CLAUDE.md`'s `ports/http/` note for the convention.
-- `ports/http/handlers.go` declares a `ReservationReadModel` outbound port (`GetReservationByID(ctx, userID, ReservationUUID) (GetReservationResponse, error)`), implemented by `adapters/db.ReservationReadModel` (a CQRS-style read side that bypasses the domain layer, built via the single joined sqlc query `GetReservationWithAppointmentByUUID`) and wired into `Handlers` via `module.go`. It backs `getReservation` and returns the OpenAPI-generated response DTO directly.
-- Neither `app/` nor `ports/http/` carry unit tests for this context by convention — see the root `CLAUDE.md` testing-conventions note; all business-logic coverage for those two layers is expected to come from component tests (`tests/component/`), which boot the real service and drive it through the generated `ports/http/client`.
+Booking is **two-phase**: requesting one allocates a technician and a bay and writes a `pending` appointment, guarded by a short-lived `Reservation` hold that the caller must confirm before it expires.
 
-## Appointment domain model
+`pending ──confirm (hold still valid)──> confirmed ──cancel──> cancelled`, and a hold left to expire frees the slot with nothing written.
 
-A booking has two related-but-distinct objects, deliberately kept separate:
+Two objects, deliberately separate, both minted by one `BookingFactory`:
 
-- **`Appointment`** (`domain/appointment.go`) owns the actual booking details (`AppointmentDetails`: dealer, service bay, technician, user, service type, vehicle, start/end time) and a 3-value status enum — `pending` / `confirmed` / `cancelled` (`domain/appointment_status.go`). It's created directly in `Pending` via `BookingFactory.CreateAppointment` (`domain/factory.go`), which validates required fields and enforces `MinStartLeadTime`.
-- **`Reservation`** (`domain/reservation.go`) is a short-lived token: a `ReservationUUID`, the `AppointmentUUID` it guards, a TTL-based `expiredAt`, and a caller-supplied `idempotencyKey` that prevents duplicate/spam booking requests — enforced by the `uq_reservation_idempotency_key` DB `UNIQUE` constraint, with the repository using an insert-first/catch-conflict pattern (`common.IsUniqueViolationError`) to return the original reservation on replay instead of erroring. Minted via `BookingFactory.CreateReservation(appointmentUUID, idempotencyKey)` (`domain/factory.go`), which requires a non-empty `idempotencyKey` and stamps `ReservationTTL` (default 5m, `defaultReservationTTL`). `AppointmentFactory` and `ReservationFactory` were merged into this single `BookingFactory`.
-- **`Appointment.Confirm(reservation *Reservation)`** transitions `Pending` → `Confirmed`. It checks the reservation actually belongs to that appointment (`reservation-mismatch`), that the appointment is still `Pending` (`appointment-not-pending`), and that the reservation hasn't expired (`reservation-expired`, via `common.NewExpiredError`) — a failed confirm never mutates status.
-- **`Appointment.Cancel()`** only allows `Confirmed` → `Cancelled`, checked in order: already-cancelled (`appointment-already-cancelled`, 409), then not-confirmed (`appointment-not-confirmed`, 409), then start time already passed (`appointment-in-the-past`, 400) — all three are typed `common.Error`s.
-- **"Expired" is not a stored status.** It's computed on read via `Appointment.IsExpired()` (`pending && startTime already passed`) — this is a no-show safety net independent of any specific `Reservation`'s own `IsExpired()` (the short checkout-window expiry checked inside `Confirm`). Nothing ever persists an "expired" value to the DB status column.
-- `domain.AppointmentRepository` (in `domain/appointment.go`) is the outbound port: `RequestAppointment(ctx, userID, *Vehicle, *Appointment, *Reservation) (ReservationUUID, error)`, `ConfirmAppointment(ctx, userID, ReservationUUID) (AppointmentUUID, error)`, `CancelAppointment(ctx, userID, AppointmentUUID) error`. Implemented by `adapters/db/appointment_repository.go` using `common.UpdateInTx`.
+- **`Appointment`** — the booking: dealer, service bay, technician, user, service type, vehicle, start/end time, plus a `pending` / `confirmed` / `cancelled` status.
+- **`Reservation`** — the hold: its UUID, the appointment it guards, `expiredAt`, and the caller's `idempotencyKey`.
+
+## Domain rules
+
+- **Start time** must fall in the bookable window: `MinStartLeadTime` (1h) to `MaxStartLeadTime` (30 days, `APPOINTMENT_MAX_START_LEAD_TIME_DAYS`). One definition, also exported as `ValidateStartTime` so `app` can reject early.
+- **`idempotencyKey`** is required and `UNIQUE` in the DB; the repository inserts first and catches the conflict, returning the *original* reservation on replay.
+- **`Confirm`** — `pending` → `confirmed`, rejecting in order: `reservation-mismatch`, `appointment-not-pending`, `reservation-expired`. A failed confirm never mutates status.
+- **`Cancel`** — `confirmed` → `cancelled` only: `appointment-already-cancelled` (409), `appointment-not-confirmed` (409), `appointment-in-the-past` (400).
+- **Availability** is decided from our own rows, never the workforce service: a resource is busy if an overlapping appointment is `confirmed`, or `pending` with an unexpired hold. Overlap is half-open, so back-to-back bookings are fine.
+- **Two expiries**, easy to confuse. The *hold* expiry (`Reservation.expiredAt`, 5m TTL) closes the checkout window and frees the slot with no row mutation. The *no-show* expiry (`Appointment.IsExpired()`: pending with a past start) is computed on read and never stored — there is no `expired` status.
+
+## Ports
+
+`domain.AppointmentRepository` (implemented in `adapters/db`): `RequestAppointment` runs at SERIALIZABLE and returns the *effective* `ReservationUUID` — on an idempotency replay that is the stored original's, so use the return value, not the reservation you built. `ConfirmAppointment` / `CancelAppointment` run at RepeatableRead.
+
+`app` declares two outbound service ports, stubbed in `adapters/catalog` and `adapters/workforce`:
+
+- **`CatalogService`** — service type → duration + required certifications.
+- **`WorkforceService`** — a dealership's technicians and bays, filtered to those **on duty** for the requested window (not off that day, not under maintenance); it knows nothing about who is already booked. The stub models this with per-resource blackout windows, plus `dealer-offday` / `dealer-maintenance` permanently blacked out for tests.
+
+## `RequestBooking`
+
+Returns just a `ReservationUUID`: catalog lookup → `ValidateStartTime` (before any external call) → workforce candidates for `[start, start+duration)` → `NewVehicle` → an allocation loop over technician/bay pairs, each checked authoritatively by the repository, skipping past whichever resource came back conflicted until one sticks or the candidates run out (`no-availability`, 409). Every external call happens before the transaction, which is retried on serialization failure.
+
+## HTTP
+
+`openapi.yaml` is the source of truth, including each endpoint's error slugs.
+
+| Endpoint | Success |
+|---|---|
+| `POST /appointments` (`requestBooking`) | `201 {reservationUuid}` |
+| `POST /reservations/{uuid}/confirm` | `200 {appointmentUuid}` |
+| `GET /reservations/{uuid}` | `200` reservation + appointment |
+| `POST /appointments/{uuid}/cancel` | `204` |
+
+- `requestBooking` is a command: it returns an identifier only, and clients follow up with `getReservation` for the details and hold expiry.
+- `X-User-Id` and `Idempotency-Key` are **optional in the spec** deliberately — with `required: true` the generated binder returns a generic `400` before the handler runs, making the documented `401 missing-user-id` unreachable. Handlers check them instead. There is no auth middleware yet.
+- `getReservation` is served by the `ReservationReadModel` port: a CQRS read side over one joined sqlc query, returning the OpenAPI DTO directly.
+
+## Wiring and testing
+
+`module.go` runs the embedded migrations, then builds factory → repository → read model → `app.Service` → `Handlers`; `internal/svc.go` mounts it, with the catalog and workforce stubs arriving via `internal.ExternalService`. By convention `app/` and `ports/http/` carry no unit tests — component tests cover them end to end.
