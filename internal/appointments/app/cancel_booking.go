@@ -6,11 +6,11 @@ import (
 	"scheduler/internal/appointments/domain"
 )
 
-type CancelAppointment struct {
+type CancelBooking struct {
 	UserID          string
 	AppointmentUUID domain.AppointmentUUID
 }
 
-func (s *Service) CancelAppointment(ctx context.Context, cmd CancelAppointment) error {
+func (s *Service) CancelBooking(ctx context.Context, cmd CancelBooking) error {
 	return s.appointmentRepo.CancelAppointment(ctx, cmd.UserID, cmd.AppointmentUUID)
 }

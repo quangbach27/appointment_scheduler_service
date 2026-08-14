@@ -2,11 +2,18 @@ openapi: 3.0.3
 info:
   title: Appointments API
   version: 1.0.0
+tags:
+  - name: Appointments
+    description: Requesting and cancelling appointments
+  - name: Reservations
+    description: Confirming and looking up the reservation hold that guards a pending appointment
 paths:
-  /appointments:
+  /reservations:
     post:
       operationId: requestBooking
-      summary: Request a booking, holding a technician and service bay with a reservation
+      tags: [Reservations]
+      summary: Request booking
+      description: Request a booking, holding a technician and service bay with a reservation
       parameters:
         - name: X-User-Id
           in: header
@@ -26,7 +33,7 @@ paths:
               $ref: '#/components/schemas/RequestBookingRequest'
       responses:
         '201':
-          description: Booking requested, reservation held. Fetch the appointment details and hold expiry via GET /reservations/{reservationUuid}
+          description: Booking requested, reservation held. Fetch the appointment details and hold expiry via GET /reservations/{reservation_uuid}
           content:
             application/json:
               schema:
@@ -61,12 +68,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /reservations/{reservationUuid}/confirm:
-    post:
-      operationId: confirmAppointment
-      summary: Confirm a pending appointment using its reservation
+  /reservations/{reservation_uuid}:
+    put:
+      operationId: confirmBooking
+      tags: [Reservations]
+      summary: Confirm booking
+      description: Confirm a pending appointment using its reservation
       parameters:
-        - name: reservationUuid
+        - name: reservation_uuid
           in: path
           required: true
           schema:
@@ -82,7 +91,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfirmAppointmentResponse'
+                $ref: '#/components/schemas/ConfirmBookingResponse'
         '400':
           description: Reservation does not belong to the appointment it targets (reservation-mismatch)
           content:
@@ -119,12 +128,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /reservations/{reservationUuid}:
     get:
       operationId: getReservation
-      summary: Get a reservation together with its appointment
+      tags: [Reservations]
+      summary: Get reservation
+      description: Get a reservation together with its appointment
       parameters:
-        - name: reservationUuid
+        - name: reservation_uuid
           in: path
           required: true
           schema:
@@ -159,12 +169,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /appointments/{appointmentUuid}/cancel:
-    post:
-      operationId: cancelAppointment
-      summary: Cancel a confirmed appointment
+  /appointments/{appointment_uuid}:
+    put:
+      operationId: cancelBooking
+      tags: [Appointments]
+      summary: Cancel booking
+      description: Cancel a confirmed appointment
       parameters:
-        - name: appointmentUuid
+        - name: appointment_uuid
           in: path
           required: true
           schema:
@@ -240,7 +252,7 @@ components:
       properties:
         reservationUuid:
           $ref: '#/components/schemas/ReservationUUID'
-    ConfirmAppointmentResponse:
+    ConfirmBookingResponse:
       type: object
       required: [appointmentUuid, status]
       properties:

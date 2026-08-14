@@ -8,13 +8,13 @@ import (
 	"scheduler/internal/common"
 )
 
-func (h Handlers) ConfirmAppointment(ctx context.Context, request ConfirmAppointmentRequestObject) (ConfirmAppointmentResponseObject, error) {
+func (h Handlers) ConfirmBooking(ctx context.Context, request ConfirmBookingRequestObject) (ConfirmBookingResponseObject, error) {
 	userID := strings.TrimSpace(common.SafeDeref(request.Params.XUserId, ""))
 	if userID == "" {
 		return nil, common.NewUnauthorizedError("missing-user-id", "X-User-Id header is required")
 	}
 
-	appointmentUUID, err := h.service.ConfirmAppointment(ctx, app.ConfirmAppointment{
+	appointmentUUID, err := h.service.ConfirmBooking(ctx, app.ConfirmBooking{
 		UserID:          userID,
 		ReservationUUID: request.ReservationUuid,
 	})
@@ -22,7 +22,7 @@ func (h Handlers) ConfirmAppointment(ctx context.Context, request ConfirmAppoint
 		return nil, err
 	}
 
-	return ConfirmAppointment200JSONResponse{
+	return ConfirmBooking200JSONResponse{
 		AppointmentUuid: appointmentUUID,
 	}, nil
 }

@@ -28,7 +28,7 @@ func TestCriticalFlow_BookRetrieveConfirm(t *testing.T) {
 	assert.Equal(t, "pending", retrieved.Appointment.Status.String())
 	assert.True(t, retrieved.ExpiredAt.After(time.Now()))
 
-	appointmentUUID := confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	appointmentUUID := confirmBooking(ctx, t, clients, reservationUUID, userID)
 	assert.False(t, appointmentUUID.IsZero())
 
 	confirmed := getReservation(ctx, t, clients, reservationUUID, userID)
@@ -54,9 +54,9 @@ func TestCriticalFlow_ConfirmFailsWhenReservationExpired(t *testing.T) {
 	// if the TTL is retuned later.
 	time.Sleep(time.Until(retrieved.ExpiredAt) + 2*time.Second)
 
-	resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
+	resp, err := clients.Appointments.ConfirmBookingWithResponse(
 		ctx, reservationUUID,
-		&appointmentClient.ConfirmAppointmentParams{XUserId: &userID},
+		&appointmentClient.ConfirmBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusGone, resp.StatusCode())

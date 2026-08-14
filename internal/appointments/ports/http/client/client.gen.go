@@ -43,8 +43,8 @@ type AppointmentStatus = domain.AppointmentStatus
 // AppointmentUUID UUID of the appointment
 type AppointmentUUID = domain.AppointmentUUID
 
-// ConfirmAppointmentResponse defines model for ConfirmAppointmentResponse.
-type ConfirmAppointmentResponse struct {
+// ConfirmBookingResponse defines model for ConfirmBookingResponse.
+type ConfirmBookingResponse struct {
 	// AppointmentUuid UUID of the appointment
 	AppointmentUuid AppointmentUUID `json:"appointmentUuid"`
 }
@@ -102,15 +102,15 @@ type ReservationUUID = domain.ReservationUUID
 // VehicleUUID UUID of the vehicle
 type VehicleUUID = domain.VehicleUUID
 
+// CancelBookingParams defines parameters for CancelBooking.
+type CancelBookingParams struct {
+	XUserId *string `json:"X-User-Id,omitempty"`
+}
+
 // RequestBookingParams defines parameters for RequestBooking.
 type RequestBookingParams struct {
 	XUserId        *string `json:"X-User-Id,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
-}
-
-// CancelAppointmentParams defines parameters for CancelAppointment.
-type CancelAppointmentParams struct {
-	XUserId *string `json:"X-User-Id,omitempty"`
 }
 
 // GetReservationParams defines parameters for GetReservation.
@@ -118,8 +118,8 @@ type GetReservationParams struct {
 	XUserId *string `json:"X-User-Id,omitempty"`
 }
 
-// ConfirmAppointmentParams defines parameters for ConfirmAppointment.
-type ConfirmAppointmentParams struct {
+// ConfirmBookingParams defines parameters for ConfirmBooking.
+type ConfirmBookingParams struct {
 	XUserId *string `json:"X-User-Id,omitempty"`
 }
 
@@ -200,41 +200,70 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// RequestBookingWithBody Request a booking, holding a technician and service bay with a reservation
+	// CancelBooking Cancel booking
+	//
+	// Cancel a confirmed appointment.
+	//
+	// Corresponds with PUT /appointments/{appointment_uuid} (the `CancelBooking` operationId).
+	CancelBooking(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelBookingParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestBookingWithBody Request booking
+	//
+	// Request a booking, holding a technician and service bay with a reservation
 	//
 	// Takes any type of body and a specified content type.
 	//
-	// Corresponds with POST /appointments (the `RequestBooking` operationId).
+	// Corresponds with POST /reservations (the `RequestBooking` operationId).
 	RequestBookingWithBody(ctx context.Context, params *RequestBookingParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RequestBooking Request a booking, holding a technician and service bay with a reservation
+	// RequestBooking Request booking
+	//
+	// Request a booking, holding a technician and service bay with a reservation
 	//
 	// Takes a body of the `application/json` content type.
 	//
-	// Corresponds with POST /appointments (the `RequestBooking` operationId).
+	// Corresponds with POST /reservations (the `RequestBooking` operationId).
 	RequestBooking(ctx context.Context, params *RequestBookingParams, body RequestBookingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CancelAppointment Cancel a confirmed appointment
+	// GetReservation Get reservation
 	//
-	// Corresponds with POST /appointments/{appointmentUuid}/cancel (the `CancelAppointment` operationId).
-	CancelAppointment(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelAppointmentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetReservation Get a reservation together with its appointment
+	// Get a reservation together with its appointment.
 	//
-	// Corresponds with GET /reservations/{reservationUuid} (the `GetReservation` operationId).
+	// Corresponds with GET /reservations/{reservation_uuid} (the `GetReservation` operationId).
 	GetReservation(ctx context.Context, reservationUuid ReservationUUID, params *GetReservationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ConfirmAppointment Confirm a pending appointment using its reservation
+	// ConfirmBooking Confirm booking
 	//
-	// Corresponds with POST /reservations/{reservationUuid}/confirm (the `ConfirmAppointment` operationId).
-	ConfirmAppointment(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmAppointmentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// Confirm a pending appointment using its reservation.
+	//
+	// Corresponds with PUT /reservations/{reservation_uuid} (the `ConfirmBooking` operationId).
+	ConfirmBooking(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmBookingParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// RequestBookingWithBody Request a booking, holding a technician and service bay with a reservation
+// CancelBooking Cancel booking
+//
+// Cancel a confirmed appointment.
+//
+// Corresponds with PUT /appointments/{appointment_uuid} (the `CancelBooking` operationId).
+func (c *Client) CancelBooking(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelBookingParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelBookingRequest(c.Server, appointmentUuid, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestBookingWithBody Request booking
+//
+// # Request a booking, holding a technician and service bay with a reservation
 //
 // Takes any type of body and a specified content type.
 //
-// Corresponds with POST /appointments (the `RequestBooking` operationId).
+// Corresponds with POST /reservations (the `RequestBooking` operationId).
 func (c *Client) RequestBookingWithBody(ctx context.Context, params *RequestBookingParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRequestBookingRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
@@ -247,11 +276,13 @@ func (c *Client) RequestBookingWithBody(ctx context.Context, params *RequestBook
 	return c.Client.Do(req)
 }
 
-// RequestBooking Request a booking, holding a technician and service bay with a reservation
+// RequestBooking Request booking
+//
+// # Request a booking, holding a technician and service bay with a reservation
 //
 // Takes a body of the `application/json` content type.
 //
-// Corresponds with POST /appointments (the `RequestBooking` operationId).
+// Corresponds with POST /reservations (the `RequestBooking` operationId).
 func (c *Client) RequestBooking(ctx context.Context, params *RequestBookingParams, body RequestBookingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRequestBookingRequest(c.Server, params, body)
 	if err != nil {
@@ -264,24 +295,11 @@ func (c *Client) RequestBooking(ctx context.Context, params *RequestBookingParam
 	return c.Client.Do(req)
 }
 
-// CancelAppointment Cancel a confirmed appointment
+// GetReservation Get reservation
 //
-// Corresponds with POST /appointments/{appointmentUuid}/cancel (the `CancelAppointment` operationId).
-func (c *Client) CancelAppointment(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelAppointmentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCancelAppointmentRequest(c.Server, appointmentUuid, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// GetReservation Get a reservation together with its appointment
+// Get a reservation together with its appointment.
 //
-// Corresponds with GET /reservations/{reservationUuid} (the `GetReservation` operationId).
+// Corresponds with GET /reservations/{reservation_uuid} (the `GetReservation` operationId).
 func (c *Client) GetReservation(ctx context.Context, reservationUuid ReservationUUID, params *GetReservationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetReservationRequest(c.Server, reservationUuid, params)
 	if err != nil {
@@ -294,11 +312,13 @@ func (c *Client) GetReservation(ctx context.Context, reservationUuid Reservation
 	return c.Client.Do(req)
 }
 
-// ConfirmAppointment Confirm a pending appointment using its reservation
+// ConfirmBooking Confirm booking
 //
-// Corresponds with POST /reservations/{reservationUuid}/confirm (the `ConfirmAppointment` operationId).
-func (c *Client) ConfirmAppointment(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmAppointmentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewConfirmAppointmentRequest(c.Server, reservationUuid, params)
+// Confirm a pending appointment using its reservation.
+//
+// Corresponds with PUT /reservations/{reservation_uuid} (the `ConfirmBooking` operationId).
+func (c *Client) ConfirmBooking(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmBookingParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmBookingRequest(c.Server, reservationUuid, params)
 	if err != nil {
 		return nil, err
 	}
@@ -307,6 +327,55 @@ func (c *Client) ConfirmAppointment(ctx context.Context, reservationUuid Reserva
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewCancelBookingRequest constructs an http.Request for the CancelBooking method
+func NewCancelBookingRequest(server string, appointmentUuid AppointmentUUID, params *CancelBookingParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "appointment_uuid", appointmentUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/appointments/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.XUserId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-User-Id", *params.XUserId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-User-Id", headerParam0)
+		}
+
+	}
+
+	return req, nil
 }
 
 // NewRequestBookingRequest calls the generic RequestBooking builder with application/json body
@@ -329,7 +398,7 @@ func NewRequestBookingRequestWithBody(server string, params *RequestBookingParam
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/appointments")
+	operationPath := fmt.Sprintf("/reservations")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -375,62 +444,13 @@ func NewRequestBookingRequestWithBody(server string, params *RequestBookingParam
 	return req, nil
 }
 
-// NewCancelAppointmentRequest constructs an http.Request for the CancelAppointment method
-func NewCancelAppointmentRequest(server string, appointmentUuid AppointmentUUID, params *CancelAppointmentParams) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "appointmentUuid", appointmentUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/appointments/%s/cancel", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-
-		if params.XUserId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-User-Id", *params.XUserId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("X-User-Id", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
 // NewGetReservationRequest constructs an http.Request for the GetReservation method
 func NewGetReservationRequest(server string, reservationUuid ReservationUUID, params *GetReservationParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "reservationUuid", reservationUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "reservation_uuid", reservationUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -473,13 +493,13 @@ func NewGetReservationRequest(server string, reservationUuid ReservationUUID, pa
 	return req, nil
 }
 
-// NewConfirmAppointmentRequest constructs an http.Request for the ConfirmAppointment method
-func NewConfirmAppointmentRequest(server string, reservationUuid ReservationUUID, params *ConfirmAppointmentParams) (*http.Request, error) {
+// NewConfirmBookingRequest constructs an http.Request for the ConfirmBooking method
+func NewConfirmBookingRequest(server string, reservationUuid ReservationUUID, params *ConfirmBookingParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "reservationUuid", reservationUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "reservation_uuid", reservationUuid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +509,7 @@ func NewConfirmAppointmentRequest(server string, reservationUuid ReservationUUID
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/reservations/%s/confirm", pathParam0)
+	operationPath := fmt.Sprintf("/reservations/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -499,7 +519,7 @@ func NewConfirmAppointmentRequest(server string, reservationUuid ReservationUUID
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -566,40 +586,119 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// RequestBookingWithBodyWithResponse Request a booking, holding a technician and service bay with a reservation
+	// CancelBookingWithResponse Cancel booking
+	//
+	// Cancel a confirmed appointment.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /appointments/{appointment_uuid} (the `CancelBooking` operationId).
+	CancelBookingWithResponse(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelBookingParams, reqEditors ...RequestEditorFn) (*CancelBookingClientResponse, error)
+
+	// RequestBookingWithBodyWithResponse Request booking
+	//
+	// Request a booking, holding a technician and service bay with a reservation
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with POST /appointments (the `RequestBooking` operationId).
+	// Corresponds with POST /reservations (the `RequestBooking` operationId).
 	RequestBookingWithBodyWithResponse(ctx context.Context, params *RequestBookingParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestBookingClientResponse, error)
 
-	// RequestBookingWithResponse Request a booking, holding a technician and service bay with a reservation
+	// RequestBookingWithResponse Request booking
+	//
+	// Request a booking, holding a technician and service bay with a reservation
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with POST /appointments (the `RequestBooking` operationId).
+	// Corresponds with POST /reservations (the `RequestBooking` operationId).
 	RequestBookingWithResponse(ctx context.Context, params *RequestBookingParams, body RequestBookingJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestBookingClientResponse, error)
 
-	// CancelAppointmentWithResponse Cancel a confirmed appointment
+	// GetReservationWithResponse Get reservation
+	//
+	// Get a reservation together with its appointment.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with POST /appointments/{appointmentUuid}/cancel (the `CancelAppointment` operationId).
-	CancelAppointmentWithResponse(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelAppointmentParams, reqEditors ...RequestEditorFn) (*CancelAppointmentClientResponse, error)
-
-	// GetReservationWithResponse Get a reservation together with its appointment
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /reservations/{reservationUuid} (the `GetReservation` operationId).
+	// Corresponds with GET /reservations/{reservation_uuid} (the `GetReservation` operationId).
 	GetReservationWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *GetReservationParams, reqEditors ...RequestEditorFn) (*GetReservationClientResponse, error)
 
-	// ConfirmAppointmentWithResponse Confirm a pending appointment using its reservation
+	// ConfirmBookingWithResponse Confirm booking
+	//
+	// Confirm a pending appointment using its reservation.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with POST /reservations/{reservationUuid}/confirm (the `ConfirmAppointment` operationId).
-	ConfirmAppointmentWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmAppointmentParams, reqEditors ...RequestEditorFn) (*ConfirmAppointmentClientResponse, error)
+	// Corresponds with PUT /reservations/{reservation_uuid} (the `ConfirmBooking` operationId).
+	ConfirmBookingWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmBookingParams, reqEditors ...RequestEditorFn) (*ConfirmBookingClientResponse, error)
+}
+
+type CancelBookingClientResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *ErrorResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *ErrorResponse
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CancelBookingClientResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CancelBookingClientResponse) GetJSON401() *ErrorResponse {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CancelBookingClientResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CancelBookingClientResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CancelBookingClientResponse) GetJSONDefault() *ErrorResponse {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CancelBookingClientResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelBookingClientResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelBookingClientResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CancelBookingClientResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type RequestBookingClientResponse struct {
@@ -678,75 +777,6 @@ func (r RequestBookingClientResponse) ContentType() string {
 	return ""
 }
 
-type CancelAppointmentClientResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *ErrorResponse
-	// JSON401 the response for an HTTP 401 `application/json` response
-	JSON401 *ErrorResponse
-	// JSON404 the response for an HTTP 404 `application/json` response
-	JSON404 *ErrorResponse
-	// JSON409 the response for an HTTP 409 `application/json` response
-	JSON409 *ErrorResponse
-	// JSONDefault the response for an HTTP default `application/json` response
-	JSONDefault *ErrorResponse
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r CancelAppointmentClientResponse) GetJSON400() *ErrorResponse {
-	return r.JSON400
-}
-
-// GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r CancelAppointmentClientResponse) GetJSON401() *ErrorResponse {
-	return r.JSON401
-}
-
-// GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r CancelAppointmentClientResponse) GetJSON404() *ErrorResponse {
-	return r.JSON404
-}
-
-// GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r CancelAppointmentClientResponse) GetJSON409() *ErrorResponse {
-	return r.JSON409
-}
-
-// GetJSONDefault returns the response for an HTTP default `application/json` response
-func (r CancelAppointmentClientResponse) GetJSONDefault() *ErrorResponse {
-	return r.JSONDefault
-}
-
-// GetBody returns the raw response body bytes
-func (r CancelAppointmentClientResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r CancelAppointmentClientResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CancelAppointmentClientResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r CancelAppointmentClientResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 type GetReservationClientResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -809,11 +839,11 @@ func (r GetReservationClientResponse) ContentType() string {
 	return ""
 }
 
-type ConfirmAppointmentClientResponse struct {
+type ConfirmBookingClientResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *ConfirmAppointmentResponse
+	JSON200 *ConfirmBookingResponse
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *ErrorResponse
 	// JSON401 the response for an HTTP 401 `application/json` response
@@ -829,47 +859,47 @@ type ConfirmAppointmentClientResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON200() *ConfirmAppointmentResponse {
+func (r ConfirmBookingClientResponse) GetJSON200() *ConfirmBookingResponse {
 	return r.JSON200
 }
 
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON400() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSON400() *ErrorResponse {
 	return r.JSON400
 }
 
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON401() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSON401() *ErrorResponse {
 	return r.JSON401
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON404() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSON404() *ErrorResponse {
 	return r.JSON404
 }
 
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON409() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
 }
 
 // GetJSON410 returns the response for an HTTP 410 `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSON410() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSON410() *ErrorResponse {
 	return r.JSON410
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
-func (r ConfirmAppointmentClientResponse) GetJSONDefault() *ErrorResponse {
+func (r ConfirmBookingClientResponse) GetJSONDefault() *ErrorResponse {
 	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
-func (r ConfirmAppointmentClientResponse) GetBody() []byte {
+func (r ConfirmBookingClientResponse) GetBody() []byte {
 	return r.Body
 }
 
 // Status returns HTTPResponse.Status
-func (r ConfirmAppointmentClientResponse) Status() string {
+func (r ConfirmBookingClientResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -877,7 +907,7 @@ func (r ConfirmAppointmentClientResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ConfirmAppointmentClientResponse) StatusCode() int {
+func (r ConfirmBookingClientResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -885,18 +915,35 @@ func (r ConfirmAppointmentClientResponse) StatusCode() int {
 }
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r ConfirmAppointmentClientResponse) ContentType() string {
+func (r ConfirmBookingClientResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
 	return ""
 }
 
-// RequestBookingWithBodyWithResponse Request a booking, holding a technician and service bay with a reservation
+// CancelBookingWithResponse Cancel booking
+//
+// Cancel a confirmed appointment.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /appointments/{appointment_uuid} (the `CancelBooking` operationId).
+func (c *ClientWithResponses) CancelBookingWithResponse(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelBookingParams, reqEditors ...RequestEditorFn) (*CancelBookingClientResponse, error) {
+	rsp, err := c.CancelBooking(ctx, appointmentUuid, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelBookingClientResponse(rsp)
+}
+
+// RequestBookingWithBodyWithResponse Request booking
+//
+// # Request a booking, holding a technician and service bay with a reservation
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
-// Corresponds with POST /appointments (the `RequestBooking` operationId).
+// Corresponds with POST /reservations (the `RequestBooking` operationId).
 func (c *ClientWithResponses) RequestBookingWithBodyWithResponse(ctx context.Context, params *RequestBookingParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestBookingClientResponse, error) {
 	rsp, err := c.RequestBookingWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
@@ -905,11 +952,13 @@ func (c *ClientWithResponses) RequestBookingWithBodyWithResponse(ctx context.Con
 	return ParseRequestBookingClientResponse(rsp)
 }
 
-// RequestBookingWithResponse Request a booking, holding a technician and service bay with a reservation
+// RequestBookingWithResponse Request booking
+//
+// # Request a booking, holding a technician and service bay with a reservation
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Corresponds with POST /appointments (the `RequestBooking` operationId).
+// Corresponds with POST /reservations (the `RequestBooking` operationId).
 func (c *ClientWithResponses) RequestBookingWithResponse(ctx context.Context, params *RequestBookingParams, body RequestBookingJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestBookingClientResponse, error) {
 	rsp, err := c.RequestBooking(ctx, params, body, reqEditors...)
 	if err != nil {
@@ -918,24 +967,13 @@ func (c *ClientWithResponses) RequestBookingWithResponse(ctx context.Context, pa
 	return ParseRequestBookingClientResponse(rsp)
 }
 
-// CancelAppointmentWithResponse Cancel a confirmed appointment
+// GetReservationWithResponse Get reservation
+//
+// Get a reservation together with its appointment.
 //
 // Returns a wrapper object for the known response body format(s).
 //
-// Corresponds with POST /appointments/{appointmentUuid}/cancel (the `CancelAppointment` operationId).
-func (c *ClientWithResponses) CancelAppointmentWithResponse(ctx context.Context, appointmentUuid AppointmentUUID, params *CancelAppointmentParams, reqEditors ...RequestEditorFn) (*CancelAppointmentClientResponse, error) {
-	rsp, err := c.CancelAppointment(ctx, appointmentUuid, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCancelAppointmentClientResponse(rsp)
-}
-
-// GetReservationWithResponse Get a reservation together with its appointment
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /reservations/{reservationUuid} (the `GetReservation` operationId).
+// Corresponds with GET /reservations/{reservation_uuid} (the `GetReservation` operationId).
 func (c *ClientWithResponses) GetReservationWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *GetReservationParams, reqEditors ...RequestEditorFn) (*GetReservationClientResponse, error) {
 	rsp, err := c.GetReservation(ctx, reservationUuid, params, reqEditors...)
 	if err != nil {
@@ -944,39 +982,37 @@ func (c *ClientWithResponses) GetReservationWithResponse(ctx context.Context, re
 	return ParseGetReservationClientResponse(rsp)
 }
 
-// ConfirmAppointmentWithResponse Confirm a pending appointment using its reservation
+// ConfirmBookingWithResponse Confirm booking
+//
+// Confirm a pending appointment using its reservation.
 //
 // Returns a wrapper object for the known response body format(s).
 //
-// Corresponds with POST /reservations/{reservationUuid}/confirm (the `ConfirmAppointment` operationId).
-func (c *ClientWithResponses) ConfirmAppointmentWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmAppointmentParams, reqEditors ...RequestEditorFn) (*ConfirmAppointmentClientResponse, error) {
-	rsp, err := c.ConfirmAppointment(ctx, reservationUuid, params, reqEditors...)
+// Corresponds with PUT /reservations/{reservation_uuid} (the `ConfirmBooking` operationId).
+func (c *ClientWithResponses) ConfirmBookingWithResponse(ctx context.Context, reservationUuid ReservationUUID, params *ConfirmBookingParams, reqEditors ...RequestEditorFn) (*ConfirmBookingClientResponse, error) {
+	rsp, err := c.ConfirmBooking(ctx, reservationUuid, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseConfirmAppointmentClientResponse(rsp)
+	return ParseConfirmBookingClientResponse(rsp)
 }
 
-// ParseRequestBookingClientResponse parses an HTTP response from a RequestBookingWithResponse call
-func ParseRequestBookingClientResponse(rsp *http.Response) (*RequestBookingClientResponse, error) {
+// ParseCancelBookingClientResponse parses an HTTP response from a CancelBookingWithResponse call
+func ParseCancelBookingClientResponse(rsp *http.Response) (*CancelBookingClientResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &RequestBookingClientResponse{
+	response := &CancelBookingClientResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest RequestBookingResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest ErrorResponse
@@ -1018,22 +1054,26 @@ func ParseRequestBookingClientResponse(rsp *http.Response) (*RequestBookingClien
 	return response, nil
 }
 
-// ParseCancelAppointmentClientResponse parses an HTTP response from a CancelAppointmentWithResponse call
-func ParseCancelAppointmentClientResponse(rsp *http.Response) (*CancelAppointmentClientResponse, error) {
+// ParseRequestBookingClientResponse parses an HTTP response from a RequestBookingWithResponse call
+func ParseRequestBookingClientResponse(rsp *http.Response) (*RequestBookingClientResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CancelAppointmentClientResponse{
+	response := &RequestBookingClientResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
-	case rsp.StatusCode == 204:
-		break // No content-type
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RequestBookingResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest ErrorResponse
@@ -1122,22 +1162,22 @@ func ParseGetReservationClientResponse(rsp *http.Response) (*GetReservationClien
 	return response, nil
 }
 
-// ParseConfirmAppointmentClientResponse parses an HTTP response from a ConfirmAppointmentWithResponse call
-func ParseConfirmAppointmentClientResponse(rsp *http.Response) (*ConfirmAppointmentClientResponse, error) {
+// ParseConfirmBookingClientResponse parses an HTTP response from a ConfirmBookingWithResponse call
+func ParseConfirmBookingClientResponse(rsp *http.Response) (*ConfirmBookingClientResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ConfirmAppointmentClientResponse{
+	response := &ConfirmBookingClientResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ConfirmAppointmentResponse
+		var dest ConfirmBookingResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

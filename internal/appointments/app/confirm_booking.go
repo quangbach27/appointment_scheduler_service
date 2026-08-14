@@ -6,11 +6,11 @@ import (
 	"scheduler/internal/appointments/domain"
 )
 
-type ConfirmAppointment struct {
+type ConfirmBooking struct {
 	UserID          string
 	ReservationUUID domain.ReservationUUID
 }
 
-func (s *Service) ConfirmAppointment(ctx context.Context, cmd ConfirmAppointment) (domain.AppointmentUUID, error) {
+func (s *Service) ConfirmBooking(ctx context.Context, cmd ConfirmBooking) (domain.AppointmentUUID, error) {
 	return s.appointmentRepo.ConfirmAppointment(ctx, cmd.UserID, cmd.ReservationUUID)
 }

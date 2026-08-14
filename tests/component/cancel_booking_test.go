@@ -18,17 +18,17 @@ import (
 // fast component test. It's covered at the domain-unit level in
 // internal/appointments/domain/appointment_test.go
 // (TestAppointment_Cancel_WhenInPast_ReturnsError).
-func TestCancelAppointment_Validation(t *testing.T) {
+func TestCancelBooking_Validation(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
 	t.Run("missing X-User-Id", func(t *testing.T) {
 		t.Parallel()
-		resp, err := clients.Appointments.CancelAppointmentWithResponse(
+		resp, err := clients.Appointments.CancelBookingWithResponse(
 			ctx,
 			appointmentClient.AppointmentUUID{UUID: common.NewUUIDv7()},
-			&appointmentClient.CancelAppointmentParams{},
+			&appointmentClient.CancelBookingParams{},
 		)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode())
@@ -39,10 +39,10 @@ func TestCancelAppointment_Validation(t *testing.T) {
 	t.Run("appointment not found", func(t *testing.T) {
 		t.Parallel()
 		userID := common.NewUUIDv7().String()
-		resp, err := clients.Appointments.CancelAppointmentWithResponse(
+		resp, err := clients.Appointments.CancelBookingWithResponse(
 			ctx,
 			appointmentClient.AppointmentUUID{UUID: common.NewUUIDv7()},
-			&appointmentClient.CancelAppointmentParams{XUserId: &userID},
+			&appointmentClient.CancelBookingParams{XUserId: &userID},
 		)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusNotFound, resp.StatusCode())
@@ -51,7 +51,7 @@ func TestCancelAppointment_Validation(t *testing.T) {
 	})
 }
 
-func TestCancelAppointment_HappyPath(t *testing.T) {
+func TestCancelBooking_HappyPath(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -61,18 +61,18 @@ func TestCancelAppointment_HappyPath(t *testing.T) {
 		ctx, t, clients, userID, common.NewUUIDv7().String(),
 		defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t)),
 	)
-	appointmentUUID := confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	appointmentUUID := confirmBooking(ctx, t, clients, reservationUUID, userID)
 
-	resp, err := clients.Appointments.CancelAppointmentWithResponse(
+	resp, err := clients.Appointments.CancelBookingWithResponse(
 		ctx, appointmentUUID,
-		&appointmentClient.CancelAppointmentParams{XUserId: &userID},
+		&appointmentClient.CancelBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode())
 	assert.Empty(t, resp.Body)
 }
 
-func TestCancelAppointment_WrongUser(t *testing.T) {
+func TestCancelBooking_WrongUser(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -82,12 +82,12 @@ func TestCancelAppointment_WrongUser(t *testing.T) {
 		ctx, t, clients, userID, common.NewUUIDv7().String(),
 		defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t)),
 	)
-	appointmentUUID := confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	appointmentUUID := confirmBooking(ctx, t, clients, reservationUUID, userID)
 
 	wrongUserID := common.NewUUIDv7().String()
-	resp, err := clients.Appointments.CancelAppointmentWithResponse(
+	resp, err := clients.Appointments.CancelBookingWithResponse(
 		ctx, appointmentUUID,
-		&appointmentClient.CancelAppointmentParams{XUserId: &wrongUserID},
+		&appointmentClient.CancelBookingParams{XUserId: &wrongUserID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode())
@@ -95,7 +95,7 @@ func TestCancelAppointment_WrongUser(t *testing.T) {
 	assert.Equal(t, "appointment-not-found", resp.JSON404.Slug)
 }
 
-func TestCancelAppointment_NotConfirmed(t *testing.T) {
+func TestCancelBooking_NotConfirmed(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -112,9 +112,9 @@ func TestCancelAppointment_NotConfirmed(t *testing.T) {
 	reservation := getReservation(ctx, t, clients, reservationUUID, userID)
 	appointmentUUID := reservation.Appointment.AppointmentUuid
 
-	resp, err := clients.Appointments.CancelAppointmentWithResponse(
+	resp, err := clients.Appointments.CancelBookingWithResponse(
 		ctx, appointmentUUID,
-		&appointmentClient.CancelAppointmentParams{XUserId: &userID},
+		&appointmentClient.CancelBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusConflict, resp.StatusCode())
@@ -122,7 +122,7 @@ func TestCancelAppointment_NotConfirmed(t *testing.T) {
 	assert.Equal(t, "appointment-not-confirmed", resp.JSON409.Slug)
 }
 
-func TestCancelAppointment_DoubleCancel(t *testing.T) {
+func TestCancelBooking_DoubleCancel(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -132,13 +132,13 @@ func TestCancelAppointment_DoubleCancel(t *testing.T) {
 		ctx, t, clients, userID, common.NewUUIDv7().String(),
 		defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t)),
 	)
-	appointmentUUID := confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	appointmentUUID := confirmBooking(ctx, t, clients, reservationUUID, userID)
 
-	cancelAppointment(ctx, t, clients, appointmentUUID, userID)
+	cancelBooking(ctx, t, clients, appointmentUUID, userID)
 
-	second, err := clients.Appointments.CancelAppointmentWithResponse(
+	second, err := clients.Appointments.CancelBookingWithResponse(
 		ctx, appointmentUUID,
-		&appointmentClient.CancelAppointmentParams{XUserId: &userID},
+		&appointmentClient.CancelBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusConflict, second.StatusCode())

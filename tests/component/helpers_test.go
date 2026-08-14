@@ -87,11 +87,11 @@ func requestBooking(
 	return resp.JSON201.ReservationUuid
 }
 
-// confirmAppointment sends one ConfirmAppointment call, asserts it
+// confirmBooking sends one ConfirmBooking call, asserts it
 // succeeded, and returns the resulting appointment UUID. Call sites that
 // expect a non-success outcome must call
-// clients.Appointments.ConfirmAppointmentWithResponse directly instead.
-func confirmAppointment(
+// clients.Appointments.ConfirmBookingWithResponse directly instead.
+func confirmBooking(
 	ctx context.Context,
 	t *testing.T,
 	clients testClients,
@@ -100,10 +100,10 @@ func confirmAppointment(
 ) appointmentClient.AppointmentUUID {
 	t.Helper()
 
-	resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
+	resp, err := clients.Appointments.ConfirmBookingWithResponse(
 		ctx,
 		reservationUUID,
-		&appointmentClient.ConfirmAppointmentParams{XUserId: &userID},
+		&appointmentClient.ConfirmBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode(), "unexpected response: %s", resp.Body)
@@ -133,10 +133,10 @@ func getReservation(
 	return *resp.JSON200
 }
 
-// cancelAppointment sends one CancelAppointment call and asserts it
+// cancelBooking sends one CancelBooking call and asserts it
 // succeeded (204, empty body). Used at setup/happy-path call sites where a
 // non-success outcome is a test bug, not something under test.
-func cancelAppointment(
+func cancelBooking(
 	ctx context.Context,
 	t *testing.T,
 	clients testClients,
@@ -145,10 +145,10 @@ func cancelAppointment(
 ) {
 	t.Helper()
 
-	resp, err := clients.Appointments.CancelAppointmentWithResponse(
+	resp, err := clients.Appointments.CancelBookingWithResponse(
 		ctx,
 		appointmentUUID,
-		&appointmentClient.CancelAppointmentParams{XUserId: &userID},
+		&appointmentClient.CancelBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode(), "unexpected response: %s", resp.Body)

@@ -17,17 +17,17 @@ import (
 // HTTP surface, and reservation-expired would require waiting out the real
 // 5-minute TTL (.env.test, no clock injection exists). Both are covered at
 // the domain-unit level in internal/appointments/domain/appointment_test.go.
-func TestConfirmAppointment_Validation(t *testing.T) {
+func TestConfirmBooking_Validation(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
 	t.Run("missing X-User-Id", func(t *testing.T) {
 		t.Parallel()
-		resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
+		resp, err := clients.Appointments.ConfirmBookingWithResponse(
 			ctx,
 			appointmentClient.ReservationUUID{UUID: common.NewUUIDv7()},
-			&appointmentClient.ConfirmAppointmentParams{},
+			&appointmentClient.ConfirmBookingParams{},
 		)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode())
@@ -38,10 +38,10 @@ func TestConfirmAppointment_Validation(t *testing.T) {
 	t.Run("reservation not found", func(t *testing.T) {
 		t.Parallel()
 		userID := common.NewUUIDv7().String()
-		resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
+		resp, err := clients.Appointments.ConfirmBookingWithResponse(
 			ctx,
 			appointmentClient.ReservationUUID{UUID: common.NewUUIDv7()},
-			&appointmentClient.ConfirmAppointmentParams{XUserId: &userID},
+			&appointmentClient.ConfirmBookingParams{XUserId: &userID},
 		)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusNotFound, resp.StatusCode())
@@ -50,7 +50,7 @@ func TestConfirmAppointment_Validation(t *testing.T) {
 	})
 }
 
-func TestConfirmAppointment_HappyPath(t *testing.T) {
+func TestConfirmBooking_HappyPath(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -61,11 +61,11 @@ func TestConfirmAppointment_HappyPath(t *testing.T) {
 		defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t)),
 	)
 
-	appointmentUUID := confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	appointmentUUID := confirmBooking(ctx, t, clients, reservationUUID, userID)
 	assert.False(t, appointmentUUID.IsZero())
 }
 
-func TestConfirmAppointment_WrongUser(t *testing.T) {
+func TestConfirmBooking_WrongUser(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -77,10 +77,10 @@ func TestConfirmAppointment_WrongUser(t *testing.T) {
 	)
 
 	wrongUserID := common.NewUUIDv7().String()
-	resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
+	resp, err := clients.Appointments.ConfirmBookingWithResponse(
 		ctx,
 		reservationUUID,
-		&appointmentClient.ConfirmAppointmentParams{XUserId: &wrongUserID},
+		&appointmentClient.ConfirmBookingParams{XUserId: &wrongUserID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode())
@@ -88,7 +88,7 @@ func TestConfirmAppointment_WrongUser(t *testing.T) {
 	assert.Equal(t, "appointment-not-found", resp.JSON404.Slug)
 }
 
-func TestConfirmAppointment_DoubleConfirm(t *testing.T) {
+func TestConfirmBooking_DoubleConfirm(t *testing.T) {
 	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -98,12 +98,12 @@ func TestConfirmAppointment_DoubleConfirm(t *testing.T) {
 		ctx, t, clients, userID, common.NewUUIDv7().String(),
 		defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t)),
 	)
-	confirmAppointment(ctx, t, clients, reservationUUID, userID)
+	confirmBooking(ctx, t, clients, reservationUUID, userID)
 
-	second, err := clients.Appointments.ConfirmAppointmentWithResponse(
+	second, err := clients.Appointments.ConfirmBookingWithResponse(
 		ctx,
 		reservationUUID,
-		&appointmentClient.ConfirmAppointmentParams{XUserId: &userID},
+		&appointmentClient.ConfirmBookingParams{XUserId: &userID},
 	)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusConflict, second.StatusCode())
