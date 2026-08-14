@@ -9,9 +9,9 @@ import (
 )
 
 func (h Handlers) RequestBooking(ctx context.Context, request RequestBookingRequestObject) (RequestBookingResponseObject, error) {
-	userID := strings.TrimSpace(common.SafeDeref(request.Params.XUserId, ""))
-	if userID == "" {
-		return nil, common.NewUnauthorizedError("missing-user-id", "X-User-Id header is required")
+	userID, err := requireUserID(request.Params.XUserId)
+	if err != nil {
+		return nil, err
 	}
 
 	idempotencyKey := strings.TrimSpace(common.SafeDeref(request.Params.IdempotencyKey, ""))

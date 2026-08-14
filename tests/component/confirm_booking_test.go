@@ -32,7 +32,7 @@ func TestConfirmBooking_Validation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode())
 		require.NotNil(t, resp.JSON401)
-		assert.Equal(t, "missing-user-id", resp.JSON401.Slug)
+		assert.Equal(t, "not-authenticated", resp.JSON401.Slug)
 	})
 
 	t.Run("reservation not found", func(t *testing.T) {

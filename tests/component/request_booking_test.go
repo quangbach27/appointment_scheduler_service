@@ -32,7 +32,7 @@ func TestRequestBooking_Validation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode())
 		require.NotNil(t, resp.JSON401)
-		assert.Equal(t, "missing-user-id", resp.JSON401.Slug)
+		assert.Equal(t, "not-authenticated", resp.JSON401.Slug)
 	})
 
 	t.Run("missing Idempotency-Key", func(t *testing.T) {
