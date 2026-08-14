@@ -5,6 +5,8 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"scheduler/internal/appointments/domain"
 	"scheduler/internal/common"
 )
@@ -116,21 +118,13 @@ func (s *Service) RequestBooking(
 
 	endTime := cmd.StartTime.Add(entry.Duration)
 
-	technicians, err := s.workforceService.ListTechnicians(ctx, ListTechniciansRequest{
-		DealerShipID:           cmd.DealerShipID,
-		RequiredCertifications: entry.RequiredCertifications,
-		StartTime:              cmd.StartTime,
-		EndTime:                endTime,
-	})
-	if err != nil {
-		return domain.ReservationUUID{}, err
-	}
-
-	bays, err := s.workforceService.ListServiceBays(ctx, ListServiceBaysRequest{
-		DealerShipID: cmd.DealerShipID,
-		StartTime:    cmd.StartTime,
-		EndTime:      endTime,
-	})
+	technicians, bays, err := s.listAvailabilityCandidates(
+		ctx,
+		cmd.DealerShipID,
+		entry.RequiredCertifications,
+		cmd.StartTime,
+		endTime,
+	)
 	if err != nil {
 		return domain.ReservationUUID{}, err
 	}
@@ -145,46 +139,6 @@ func (s *Service) RequestBooking(
 		return technicians[i].ReviewScore > technicians[j].ReviewScore
 	})
 
-	createFn := func(
-		busyServiceBayIDs map[string]string,
-		busyTechnicianIDs map[string]string,
-	) (*domain.Appointment, *domain.Reservation, error) {
-		var technicianID string
-		for _, technician := range technicians {
-			if _, busy := busyTechnicianIDs[technician.ID]; !busy {
-				technicianID = technician.ID
-				break
-			}
-		}
-
-		var serviceBayID string
-		for _, bay := range bays {
-			if _, busy := busyServiceBayIDs[bay.ID]; !busy {
-				serviceBayID = bay.ID
-				break
-			}
-		}
-
-		if technicianID == "" || serviceBayID == "" {
-			return nil, nil, errNoAvailability()
-		}
-
-		appointment, err := appointmentBuilder.
-			WithTechnicianID(technicianID).
-			WithServiceBayID(serviceBayID).
-			Build()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		reservation, err := s.bookingFactory.CreateReservation(appointment.UUID(), cmd.IdempotencyKey)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return appointment, reservation, nil
-	}
-
 	return s.appointmentRepo.RequestAppointment(
 		ctx,
 		domain.RequestAppointmentParams{
@@ -195,8 +149,91 @@ func (s *Service) RequestBooking(
 			EndTime:        endTime,
 			Vehicle:        vehicle,
 		},
-		createFn,
+		func(
+			busyServiceBayIDs,
+			busyTechnicianIDs map[string]string,
+		) (*domain.Appointment, *domain.Reservation, error) {
+			var technicianID string
+			for _, technician := range technicians {
+				if _, busy := busyTechnicianIDs[technician.ID]; !busy {
+					technicianID = technician.ID
+					break
+				}
+			}
+
+			var serviceBayID string
+			for _, bay := range bays {
+				if _, busy := busyServiceBayIDs[bay.ID]; !busy {
+					serviceBayID = bay.ID
+					break
+				}
+			}
+
+			if technicianID == "" || serviceBayID == "" {
+				return nil, nil, errNoAvailability()
+			}
+
+			appointment, err := appointmentBuilder.
+				WithTechnicianID(technicianID).
+				WithServiceBayID(serviceBayID).
+				Build()
+			if err != nil {
+				return nil, nil, err
+			}
+
+			reservation, err := s.bookingFactory.CreateReservation(
+				appointment.UUID(),
+				cmd.IdempotencyKey,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			return appointment, reservation, nil
+		},
 	)
+}
+
+// listAvailabilityCandidates fetches the on-duty technicians and service bays
+// for the given dealership and window concurrently, since neither call
+// depends on the other's result.
+func (s *Service) listAvailabilityCandidates(
+	ctx context.Context,
+	dealerShipID string,
+	requiredCertifications []string,
+	startTime, endTime time.Time,
+) ([]Technician, []ServiceBay, error) {
+	var technicians []Technician
+	var bays []ServiceBay
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		var err error
+		technicians, err = s.workforceService.ListTechnicians(gCtx, ListTechniciansRequest{
+			DealerShipID:           dealerShipID,
+			RequiredCertifications: requiredCertifications,
+			StartTime:              startTime,
+			EndTime:                endTime,
+		})
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		bays, err = s.workforceService.ListServiceBays(gCtx, ListServiceBaysRequest{
+			DealerShipID: dealerShipID,
+			StartTime:    startTime,
+			EndTime:      endTime,
+		})
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
+	}
+
+	return technicians, bays, nil
 }
 
 func errNoAvailability() error {

@@ -8,7 +8,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: GetAppointmentByUUIDAndUserID :one
 SELECT * FROM appointments.appointment
-WHERE appointment_uuid = $1 AND user_id = $2;
+WHERE user_id = $1 AND appointment_uuid = $2;
 
 -- name: UpdateAppointmentStatus :exec
 UPDATE appointments.appointment
@@ -19,9 +19,6 @@ WHERE appointment_uuid = $1;
 -- window: busy if an overlapping appointment is confirmed, or pending with an
 -- unexpired hold. Overlap is half-open, so back-to-back appointments don't
 -- conflict.
---
--- This read must run inside the booking transaction: at SERIALIZABLE it is
--- what creates the predicate lock SSI needs to detect two concurrent bookings.
 -- name: GetBusyServiceBaysAndTechnicians :many
 SELECT DISTINCT
     a.service_bay_id,

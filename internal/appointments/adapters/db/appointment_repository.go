@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,20 +68,9 @@ func (r *AppointmentRepository) RequestAppointment(
 			return err
 		}
 
-		busyRows, err := q.GetBusyServiceBaysAndTechnicians(ctx, dbmodels.GetBusyServiceBaysAndTechniciansParams{
-			DealerShipID: params.DealerShipID,
-			StartTime:    params.StartTime,
-			EndTime:      params.EndTime,
-		})
+		busyServiceBayIDs, busyTechnicianIDs, err := r.getBusyCandidates(ctx, q, params)
 		if err != nil {
 			return err
-		}
-
-		busyServiceBayIDs := make(map[string]string, len(busyRows))
-		busyTechnicianIDs := make(map[string]string, len(busyRows))
-		for _, row := range busyRows {
-			busyServiceBayIDs[row.ServiceBayID] = row.TechnicianID
-			busyTechnicianIDs[row.TechnicianID] = row.ServiceBayID
 		}
 
 		appointment, reservation, err := createFn(busyServiceBayIDs, busyTechnicianIDs)
@@ -158,26 +148,15 @@ func (r *AppointmentRepository) ConfirmAppointment(
 	err := common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
-		reservationRow, err := q.GetReservationByUUID(ctx, reservationUUID)
+		reservation, err := r.getReservation(ctx, q, reservationUUID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return common.NewNotFoundError("reservation-not-found", "reservation not found")
-			}
 			return err
 		}
-		reservation := unmarshalReservation(reservationRow)
 
-		appointmentRow, err := q.GetAppointmentByUUIDAndUserID(ctx, dbmodels.GetAppointmentByUUIDAndUserIDParams{
-			AppointmentUuid: reservation.AppointmentUUID(),
-			UserID:          userID,
-		})
+		appointment, err := r.getAppointment(ctx, q, reservation.AppointmentUUID(), userID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return common.NewNotFoundError("appointment-not-found", "appointment not found")
-			}
 			return err
 		}
-		appointment := unmarshalAppointment(appointmentRow)
 
 		if err := appointment.Confirm(reservation); err != nil {
 			return err
@@ -203,22 +182,15 @@ func (r *AppointmentRepository) ConfirmAppointment(
 func (r *AppointmentRepository) CancelAppointment(
 	ctx context.Context,
 	userID string,
-	uuid domain.AppointmentUUID,
+	appointmentUUID domain.AppointmentUUID,
 ) error {
 	return common.UpdateInTx(ctx, r.db, func(ctx context.Context, tx pgx.Tx) error {
 		q := dbmodels.New(tx)
 
-		appointmentRow, err := q.GetAppointmentByUUIDAndUserID(ctx, dbmodels.GetAppointmentByUUIDAndUserIDParams{
-			AppointmentUuid: uuid,
-			UserID:          userID,
-		})
+		appointment, err := r.getAppointment(ctx, q, appointmentUUID, userID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return common.NewNotFoundError("appointment-not-found", "appointment not found")
-			}
 			return err
 		}
-		appointment := unmarshalAppointment(appointmentRow)
 
 		if err := appointment.Cancel(); err != nil {
 			return err
@@ -229,6 +201,76 @@ func (r *AppointmentRepository) CancelAppointment(
 			Status:          appointment.Status(),
 		})
 	})
+}
+
+func (r *AppointmentRepository) getBusyCandidates(
+	ctx context.Context,
+	queries *dbmodels.Queries,
+	params domain.RequestAppointmentParams,
+) (
+	map[string]string,
+	map[string]string,
+	error,
+) {
+	busyRows, err := queries.GetBusyServiceBaysAndTechnicians(ctx, dbmodels.GetBusyServiceBaysAndTechniciansParams{
+		DealerShipID: params.DealerShipID,
+		StartTime:    params.StartTime,
+		EndTime:      params.EndTime,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("error retrieving busy candidate: %w", err)
+	}
+
+	busyServiceBayIDs := make(map[string]string, len(busyRows))
+	busyTechnicianIDs := make(map[string]string, len(busyRows))
+	for _, row := range busyRows {
+		busyServiceBayIDs[row.ServiceBayID] = row.TechnicianID
+		busyTechnicianIDs[row.TechnicianID] = row.ServiceBayID
+	}
+
+	return busyServiceBayIDs, busyTechnicianIDs, nil
+}
+
+func (r *AppointmentRepository) getReservation(
+	ctx context.Context,
+	q *dbmodels.Queries,
+	reservationUUID domain.ReservationUUID,
+) (*domain.Reservation, error) {
+	reservationRow, err := q.GetReservationByUUID(ctx, reservationUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, common.NewNotFoundError(
+				"reservation-not-found",
+				"reservation not found",
+			).WithInternalError(err)
+		}
+		return nil, fmt.Errorf("error retrieving reservation: %w", err)
+	}
+
+	return unmarshalReservation(reservationRow), nil
+}
+
+func (r *AppointmentRepository) getAppointment(
+	ctx context.Context,
+	q *dbmodels.Queries,
+	appointmentUUID domain.AppointmentUUID,
+	userID string,
+) (*domain.Appointment, error) {
+	appointmentRow, err := q.GetAppointmentByUUIDAndUserID(ctx, dbmodels.GetAppointmentByUUIDAndUserIDParams{
+		AppointmentUuid: appointmentUUID,
+		UserID:          userID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, common.NewNotFoundError(
+				"appointment-not-found",
+				"appointment not found",
+			).WithInternalError(err)
+		}
+		return nil, fmt.Errorf("error retrieving appointment: %w", err)
+	}
+
+	return unmarshalAppointment(appointmentRow), nil
 }
 
 func unmarshalReservation(row dbmodels.AppointmentsReservation) *domain.Reservation {

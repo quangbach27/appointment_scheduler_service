@@ -71,16 +71,16 @@ func (q *Queries) GetAppointmentByUUID(ctx context.Context, appointmentUuid doma
 
 const getAppointmentByUUIDAndUserID = `-- name: GetAppointmentByUUIDAndUserID :one
 SELECT appointment_uuid, dealer_ship_id, service_bay_id, technician_id, user_id, service_type, start_time, estimated_end_time, status, vehicle_uuid FROM appointments.appointment
-WHERE appointment_uuid = $1 AND user_id = $2
+WHERE user_id = $1 AND appointment_uuid = $2
 `
 
 type GetAppointmentByUUIDAndUserIDParams struct {
-	AppointmentUuid domain.AppointmentUUID
 	UserID          string
+	AppointmentUuid domain.AppointmentUUID
 }
 
 func (q *Queries) GetAppointmentByUUIDAndUserID(ctx context.Context, arg GetAppointmentByUUIDAndUserIDParams) (AppointmentsAppointment, error) {
-	row := q.db.QueryRow(ctx, getAppointmentByUUIDAndUserID, arg.AppointmentUuid, arg.UserID)
+	row := q.db.QueryRow(ctx, getAppointmentByUUIDAndUserID, arg.UserID, arg.AppointmentUuid)
 	var i AppointmentsAppointment
 	err := row.Scan(
 		&i.AppointmentUuid,
@@ -129,9 +129,6 @@ type GetBusyServiceBaysAndTechniciansRow struct {
 // window: busy if an overlapping appointment is confirmed, or pending with an
 // unexpired hold. Overlap is half-open, so back-to-back appointments don't
 // conflict.
-//
-// This read must run inside the booking transaction: at SERIALIZABLE it is
-// what creates the predicate lock SSI needs to detect two concurrent bookings.
 func (q *Queries) GetBusyServiceBaysAndTechnicians(ctx context.Context, arg GetBusyServiceBaysAndTechniciansParams) ([]GetBusyServiceBaysAndTechniciansRow, error) {
 	rows, err := q.db.Query(ctx, getBusyServiceBaysAndTechnicians, arg.DealerShipID, arg.EndTime, arg.StartTime)
 	if err != nil {
