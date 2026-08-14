@@ -18,23 +18,17 @@ This document describes the appointment-booking backend in this repository: how 
 
 **Scenario A — The Unified Service Scheduler.** Domain: **Ownership** (post-sale vehicle service).
 
-**Problem**: dealerships handle bookings manually on whiteboards and paper notes. This creates huge problems:
-
-- Double-bookings: Two advisors book the same technician at 10 AM, and nobody notices until the customer arrives.
-
-- Wasted space: A service bay stays empty all morning just because no one marked it free.
-
-- Lost records: If a customer reschedules, the original booking is usually lost on a thrown-away Post-it note.
+**Problem Context**: Traditional dealerships manage service appointments using manual whiteboards or paper tickets, leading to double-bookings, poor resource utilization, and lost records.
 
 The Unified Service Scheduler fixes all of this. It automatically checks real-time availability for both technicians and service bays, preventing double-bookings and keeping every record organized.
 
 Four requirements drive every decision in this document:
 
-1. **Resource Constrained Booking** — a customer requests an appointment for a specific vehicle, service type, and dealership at a desired time.
-2. **Real-Time Availability Check** — before confirming, both a `ServiceBay` and a qualified `Technician` must be free for the *entire* service duration, checked at request time, not against a stale cache.
-3. **Confirmed Appointment Record** — on success, a persistent `Appointment` record ties together customer, vehicle, technician, and service bay.
-4. **Cancellation** — a customer can cancel a confirmed appointment, freeing the technician and bay for someone else and leaving a record that it was cancelled, rather than the slot silently vanishing the way an erased whiteboard entry does today.
+1. Request Booking: The customer initiates an appointment request specifying the vehicle, service type, dealership, and target timeframe.
 
+2. Confirm Booking: The system validates real-time resource availability (Technician + Service Bay) and locks in the reservation.
+
+3. Cancel Booking: The customer or advisor cancels an existing booking, instantly releasing locked resources while maintaining an audit trail.
 ---
 
 
@@ -68,7 +62,48 @@ This bounded context maps directly onto `internal/appointments/` in the code.
 
 ---
 
-## 4. Data Flow
+## 4. Architecture
+
+```mermaid
+flowchart TB
+    classDef planned fill:#eee,stroke:#999,color:#555,stroke-dasharray: 4 3
+
+    Client(["HTTP Client"])
+    Gateway["API Gateway (planned)<br/>authenticates guest vs. logged-in user,<br/>attaches trusted X-User-Id header"]:::planned
+
+    subgraph Appointments["Bounded context — internal/appointments"]
+      direction TB
+      Handlers["ports/http<br/>oapi-codegen echo strict server"]
+      Service["app.Service<br/>RequestBooking<br/>ConfirmBooking<br/>CancelBooking"]
+      Domain["domain<br/>BookingFactory · Appointment · Reservation"]
+      Repo["adapters/db<br/>AppointmentRepository (sqlc + pgx)"]
+      ReadModel["adapters/db<br/>ReservationReadModel"]
+      Catalog["adapters/catalog<br/>implements CatalogService<br/>stub today; real impl slots in alongside"]
+      Workforce["adapters/workforce<br/>implements WorkforceService<br/>stub today; real impl slots in alongside"]
+
+      Handlers -->|commands| Service
+      Handlers -->|ReservationReadModel port — ports/http| ReadModel
+      Service --> Domain
+      Service -->|AppointmentRepository port — domain, SERIALIZABLE tx| Repo
+      Service -->|CatalogService port — app| Catalog
+      Service -->|WorkforceService port — app| Workforce
+    end
+
+    Client --> Gateway
+    Gateway -->|X-User-Id| Handlers
+    Repo --> PG[("Postgres<br/>appointments schema")]
+    ReadModel --> PG
+```
+
+- **No API Gateway exists yet** (shown dashed above as planned). Today `X-User-Id` is just a header the caller supplies and `ports/http` handlers check for presence, not authenticity — there's no auth middleware, and nothing distinguishes a guest from a logged-in user. The gateway is where that responsibility belongs: authenticate the caller, resolve guest vs. logged-in, and attach a trustworthy `X-User-Id` before the request ever reaches this bounded context.
+- The composition root (`cmd/main.go`, `internal/svc.go`) wires exactly one module today (`appointments`), through `Init` → `RegisterContracts` → `Verify()` → `RegisterHttp`. `Verify()` runs once, after every module has registered, so a missing cross-module contract fails fast at startup rather than at first request. `Svc.Run` uses `errgroup.WithContext` to run the HTTP server and a shutdown watcher as two goroutines — `SIGINT`/`SIGTERM` cancels the context, the watcher closes the pgx pool and calls `echo.Shutdown` with a 30s grace period.
+- `CatalogService` and `WorkforceService` are ports — Go interfaces declared and depended on by the `app` layer (`internal/appointments/app/request_appointment.go`). Each is implemented in its own `adapters/<service>` package (`adapters/catalog`, `adapters/workforce`); today only the in-memory stub implementation exists in each, injected via `internal.ExternalService`. The convention is for a real integration to sit beside the stub in the same package once one exists — swappable without touching `app` or `domain`.
+- Ports aren't uniformly `app`-owned: `AppointmentRepository` is declared by `domain` (`internal/appointments/domain/appointment.go`) and implemented by `adapters/db`, since it's the domain layer that needs a way to persist and reload its own aggregates. `ReservationReadModel` is declared by `ports/http` itself (`internal/appointments/ports/http/handlers.go`) and also implemented in `adapters/db` — the HTTP layer owns its own read-side dependency because the CQRS query path bypasses `domain`/`app` entirely. Each interface is declared by whichever layer actually depends on it, not by one canonical location.
+- Local dev runs both `scheduler-app` and `scheduler-db` (Postgres 17) under `docker-compose.yaml`, with source bind-mounted and a file-watcher (`reflex`) restarting the process on change. Production builds a separate multi-stage image (`docker/app/prod/Dockerfile`): a static, stripped Go binary (`CGO_ENABLED=0`, `-ldflags="-w -s"`) copied onto `gcr.io/distroless/static-debian13:nonroot-amd64` — no shell, no package manager, runs as a non-root user.
+
+---
+
+## 5. Data Flow
 
 The technical counterpart to the Event Storming narrative — what actually happens on the wire for each command. Blue marks work done concurrently; amber marks the database transaction.
 
@@ -182,46 +217,7 @@ The read side (`GetReservation`) skips this shape entirely: it's served directly
 
 ---
 
-## 5. Architecture
 
-```mermaid
-flowchart TB
-    classDef planned fill:#eee,stroke:#999,color:#555,stroke-dasharray: 4 3
-
-    Client(["HTTP Client"])
-    Gateway["API Gateway (planned)<br/>authenticates guest vs. logged-in user,<br/>attaches trusted X-User-Id header"]:::planned
-
-    subgraph Appointments["Bounded context — internal/appointments"]
-      direction TB
-      Handlers["ports/http<br/>oapi-codegen echo strict server"]
-      Service["app.Service<br/>RequestBooking · ConfirmAppointment · CancelAppointment"]
-      Domain["domain<br/>BookingFactory · Appointment · Reservation"]
-      Repo["adapters/db<br/>AppointmentRepository (sqlc + pgx)"]
-      ReadModel["adapters/db<br/>ReservationReadModel"]
-      Catalog["adapters/catalog<br/>implements CatalogService<br/>stub today; real impl slots in alongside"]
-      Workforce["adapters/workforce<br/>implements WorkforceService<br/>stub today; real impl slots in alongside"]
-
-      Handlers -->|commands| Service
-      Handlers -->|ReservationReadModel port — ports/http| ReadModel
-      Service --> Domain
-      Service -->|AppointmentRepository port — domain, SERIALIZABLE tx| Repo
-      Service -->|CatalogService port — app| Catalog
-      Service -->|WorkforceService port — app| Workforce
-    end
-
-    Client --> Gateway
-    Gateway -->|X-User-Id| Handlers
-    Repo --> PG[("Postgres<br/>appointments schema")]
-    ReadModel --> PG
-```
-
-- **No API Gateway exists yet** (shown dashed above as planned). Today `X-User-Id` is just a header the caller supplies and `ports/http` handlers check for presence, not authenticity — there's no auth middleware, and nothing distinguishes a guest from a logged-in user. The gateway is where that responsibility belongs: authenticate the caller, resolve guest vs. logged-in, and attach a trustworthy `X-User-Id` before the request ever reaches this bounded context.
-- The composition root (`cmd/main.go`, `internal/svc.go`) wires exactly one module today (`appointments`), through `Init` → `RegisterContracts` → `Verify()` → `RegisterHttp`. `Verify()` runs once, after every module has registered, so a missing cross-module contract fails fast at startup rather than at first request. `Svc.Run` uses `errgroup.WithContext` to run the HTTP server and a shutdown watcher as two goroutines — `SIGINT`/`SIGTERM` cancels the context, the watcher closes the pgx pool and calls `echo.Shutdown` with a 30s grace period.
-- `CatalogService` and `WorkforceService` are ports — Go interfaces declared and depended on by the `app` layer (`internal/appointments/app/request_appointment.go`). Each is implemented in its own `adapters/<service>` package (`adapters/catalog`, `adapters/workforce`); today only the in-memory stub implementation exists in each, injected via `internal.ExternalService`. The convention is for a real integration to sit beside the stub in the same package once one exists — swappable without touching `app` or `domain`.
-- Ports aren't uniformly `app`-owned: `AppointmentRepository` is declared by `domain` (`internal/appointments/domain/appointment.go`) and implemented by `adapters/db`, since it's the domain layer that needs a way to persist and reload its own aggregates. `ReservationReadModel` is declared by `ports/http` itself (`internal/appointments/ports/http/handlers.go`) and also implemented in `adapters/db` — the HTTP layer owns its own read-side dependency because the CQRS query path bypasses `domain`/`app` entirely. Each interface is declared by whichever layer actually depends on it, not by one canonical location.
-- Local dev runs both `scheduler-app` and `scheduler-db` (Postgres 17) under `docker-compose.yaml`, with source bind-mounted and a file-watcher (`reflex`) restarting the process on change. Production builds a separate multi-stage image (`docker/app/prod/Dockerfile`): a static, stripped Go binary (`CGO_ENABLED=0`, `-ldflags="-w -s"`) copied onto `gcr.io/distroless/static-debian13:nonroot-amd64` — no shell, no package manager, runs as a non-root user.
-
----
 
 ## 6. Component Roles
 ![alt text](image-2.png)
@@ -250,13 +246,6 @@ flowchart TB
 - **Request/response logging**: one line per request with method, URI, status, duration, and truncated request/response bodies (full bodies at `debug` level).
 - **Typed, stable error responses**: every error surfaces as `{message, slug, details}` — clients can branch on `slug` without parsing prose, and internals never leak past the mapping.
 - **Health/readiness**: `GET /healthz`, plus a Postgres container healthcheck (`pg_isready`) gating app startup in compose.
-
-### Gaps found, proposed as future work
-
-- **No metrics today.** `go.mod` incidentally pulls in OpenTelemetry and `zap` — but only as transitive build-tool dependencies of `sqlc`'s codegen, never wired into the running application. Proposed: a `/metrics` endpoint (Prometheus) with request-rate/latency histograms per route, and — directly motivated by the retry-budget investigation above — **a counter for SERIALIZABLE retry attempts and exhaustion**, since that number is a real, load-bearing signal for this system's health, not a curiosity: it's the difference between silent success and a customer-facing `500`.
-- **No distributed tracing.** Proposed: OpenTelemetry spans across HTTP → use case → DB transaction, correlated with the existing `Correlation-ID` so a trace and a log line for the same request can be cross-referenced.
-- **Log level is hardcoded** (`slog.LevelInfo` in `main.go`, not env-driven) — proposed as a one-line config addition so `debug` can be enabled per-environment without a rebuild.
-- **No alerting layer yet** — once the retry/conflict counter above exists, it's the natural first alert: a sustained rise means either a genuine capacity problem at a specific dealer or a regression in the lock-narrowing index.
 
 ---
 
