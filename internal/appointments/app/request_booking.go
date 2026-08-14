@@ -9,6 +9,7 @@ import (
 
 	"scheduler/internal/appointments/domain"
 	"scheduler/internal/common"
+	"scheduler/internal/common/log"
 )
 
 type ServiceCatalogEntry struct {
@@ -86,6 +87,10 @@ func (s *Service) RequestBooking(
 	); err != nil {
 		return domain.ReservationUUID{}, err
 	} else if found {
+		log.FromContext(ctx).Info("idempotent replay: fast-path hit, skipping booking",
+			"idempotency_key", cmd.IdempotencyKey,
+			"reservation_uuid", reservationUUID.String(),
+		)
 		return reservationUUID, nil
 	}
 

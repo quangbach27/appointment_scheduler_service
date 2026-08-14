@@ -11,6 +11,7 @@ import (
 	"scheduler/internal/appointments/adapters/db/dbmodels"
 	"scheduler/internal/appointments/domain"
 	"scheduler/internal/common"
+	"scheduler/internal/common/log"
 )
 
 const uniqueReservationIdempotencyKeyConstraint = "uq_reservation_idempotency_key"
@@ -61,6 +62,10 @@ func (r *AppointmentRepository) RequestAppointment(
 		// original reservation, not be told its own booking made the slot busy.
 		existing, err := q.GetReservationByIdempotencyKey(ctx, params.IdempotencyKey)
 		if err == nil {
+			log.FromContext(ctx).Info("idempotent replay: caught by in-tx re-check",
+				"idempotency_key", params.IdempotencyKey,
+				"reservation_uuid", existing.ReservationUuid.String(),
+			)
 			result = existing.ReservationUuid
 			return nil
 		}
@@ -130,6 +135,10 @@ func (r *AppointmentRepository) RequestAppointment(
 			if getErr != nil {
 				return domain.ReservationUUID{}, getErr
 			}
+			log.FromContext(ctx).Info("idempotent replay: caught by unique-constraint backstop",
+				"idempotency_key", params.IdempotencyKey,
+				"reservation_uuid", existing.ReservationUuid.String(),
+			)
 			return existing.ReservationUuid, nil
 		}
 		return domain.ReservationUUID{}, err
