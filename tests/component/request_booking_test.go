@@ -15,10 +15,12 @@ import (
 )
 
 func TestRequestBooking_Validation(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
 	t.Run("missing X-User-Id", func(t *testing.T) {
+		t.Parallel()
 		idempotencyKey := common.NewUUIDv7().String()
 		resp, err := clients.Appointments.RequestBookingWithResponse(
 			ctx,
@@ -34,6 +36,7 @@ func TestRequestBooking_Validation(t *testing.T) {
 	})
 
 	t.Run("missing Idempotency-Key", func(t *testing.T) {
+		t.Parallel()
 		userID := common.NewUUIDv7().String()
 		resp, err := clients.Appointments.RequestBookingWithResponse(
 			ctx,
@@ -143,6 +146,7 @@ func TestRequestBooking_Validation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			body := defaultRequestBookingBody(dealerHappyPath, serviceOilChange, nextStart(t))
 			if tc.mutate != nil {
 				tc.mutate(&body)
@@ -186,6 +190,7 @@ func TestRequestBooking_Validation(t *testing.T) {
 }
 
 func TestRequestBooking_IdempotencyKey(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
@@ -220,6 +225,7 @@ func TestRequestBooking_IdempotencyKey(t *testing.T) {
 const concurrentBookers = 5
 
 func TestRequestBooking_RaceCondition_OnlyOneBookerWins(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	body := defaultRequestBookingBody(dealerSolo, serviceOilChange, nextStart(t))

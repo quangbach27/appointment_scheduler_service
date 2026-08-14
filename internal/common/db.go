@@ -73,7 +73,7 @@ func updateInTxWithIsolation(
 			return struct{}{}, nil
 		},
 		backoff.WithBackOff(b),
-		backoff.WithMaxTries(5),
+		backoff.WithMaxTries(10),
 	)
 
 	return err

@@ -19,10 +19,12 @@ import (
 // internal/appointments/domain/appointment_test.go
 // (TestAppointment_Cancel_WhenInPast_ReturnsError).
 func TestCancelAppointment_Validation(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
 	t.Run("missing X-User-Id", func(t *testing.T) {
+		t.Parallel()
 		resp, err := clients.Appointments.CancelAppointmentWithResponse(
 			ctx,
 			appointmentClient.AppointmentUUID{UUID: common.NewUUIDv7()},
@@ -35,6 +37,7 @@ func TestCancelAppointment_Validation(t *testing.T) {
 	})
 
 	t.Run("appointment not found", func(t *testing.T) {
+		t.Parallel()
 		userID := common.NewUUIDv7().String()
 		resp, err := clients.Appointments.CancelAppointmentWithResponse(
 			ctx,
@@ -49,6 +52,7 @@ func TestCancelAppointment_Validation(t *testing.T) {
 }
 
 func TestCancelAppointment_HappyPath(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -69,6 +73,7 @@ func TestCancelAppointment_HappyPath(t *testing.T) {
 }
 
 func TestCancelAppointment_WrongUser(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -91,6 +96,7 @@ func TestCancelAppointment_WrongUser(t *testing.T) {
 }
 
 func TestCancelAppointment_NotConfirmed(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -117,6 +123,7 @@ func TestCancelAppointment_NotConfirmed(t *testing.T) {
 }
 
 func TestCancelAppointment_DoubleCancel(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()

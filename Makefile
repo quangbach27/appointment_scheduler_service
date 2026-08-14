@@ -1,4 +1,5 @@
 SERVICE ?= scheduler-app
+LOAD_TEST_ENV = set -a && . ./.env.test && set +a &&
 
 .PHONY: up
 up:
@@ -19,9 +20,10 @@ down-volumes:
 
 ## Run all tests (unit, integration, component)
 .PHONY: test
-test: 
-	$(MAKE) test-integration 
-	$(MAKE) test-component
+test:
+	$(LOAD_TEST_ENV) \
+	go test -tags integration ./internal/... -count=1 && \
+	go test ./tests/... -count=1
 
 ## Run unit tests
 .PHONY: test-unit
@@ -31,14 +33,12 @@ test-unit:
 ## Run integration tests
 .PHONY: test-integration
 test-integration:
-	set -a && . ./.env.test && set +a && \
-	go test -tags integration ./internal/... -count=1
+	$(LOAD_TEST_ENV) go test -tags integration ./internal/... -count=1
 
 ## Run component tests
 .PHONY: test-component
 test-component:
-	set -a && . ./.env.test && set +a && \
-	go test ./tests/... -count=1
+	$(LOAD_TEST_ENV) go test ./tests/... -count=1
 
 ## Run go generate
 .PHONY: gen

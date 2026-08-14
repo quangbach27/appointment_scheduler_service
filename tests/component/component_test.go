@@ -14,6 +14,7 @@ import (
 )
 
 func TestCriticalFlow_BookRetrieveConfirm(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -36,6 +37,7 @@ func TestCriticalFlow_BookRetrieveConfirm(t *testing.T) {
 }
 
 func TestCriticalFlow_ConfirmFailsWhenReservationExpired(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()

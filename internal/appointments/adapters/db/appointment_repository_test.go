@@ -21,6 +21,7 @@ import (
 )
 
 func TestAppointmentRepository_ConfirmAppointment(t *testing.T) {
+	t.Parallel()
 	repo := appointmentsdb.NewAppointmentRepository(testutils.NewDB())
 	f := newAppointmentFixture(t)
 	vehicle, appointment, reservation := f.build(t)
@@ -34,9 +35,10 @@ func TestAppointmentRepository_ConfirmAppointment(t *testing.T) {
 }
 
 func TestAppointmentRepository_ConfirmAppointment_ReservationNotFound(t *testing.T) {
+	t.Parallel()
 	repo := appointmentsdb.NewAppointmentRepository(testutils.NewDB())
 
-	_, err := repo.ConfirmAppointment(context.Background(), common.NewUUIDv7().String(), domain.ReservationUUID{UUID: common.NewUUIDv7()})
+	_, err := repo.ConfirmAppointment(context.Background(), testutils.RandomString(), domain.ReservationUUID{UUID: common.NewUUIDv7()})
 	require.Error(t, err)
 
 	var domainErr common.Error
@@ -45,6 +47,7 @@ func TestAppointmentRepository_ConfirmAppointment_ReservationNotFound(t *testing
 }
 
 func TestAppointmentRepository_ConfirmAppointment_WrongUserReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	repo := appointmentsdb.NewAppointmentRepository(testutils.NewDB())
 	f := newAppointmentFixture(t)
 	vehicle, appointment, reservation := f.build(t)
@@ -52,7 +55,7 @@ func TestAppointmentRepository_ConfirmAppointment_WrongUserReturnsNotFound(t *te
 	_, err := requestAppointment(t, repo, f.userID, vehicle, appointment, reservation)
 	require.NoError(t, err)
 
-	_, err = repo.ConfirmAppointment(context.Background(), common.NewUUIDv7().String(), reservation.UUID())
+	_, err = repo.ConfirmAppointment(context.Background(), testutils.RandomString(), reservation.UUID())
 	require.Error(t, err)
 
 	var domainErr common.Error
@@ -61,6 +64,7 @@ func TestAppointmentRepository_ConfirmAppointment_WrongUserReturnsNotFound(t *te
 }
 
 func TestAppointmentRepository_CancelAppointment(t *testing.T) {
+	t.Parallel()
 	repo := appointmentsdb.NewAppointmentRepository(testutils.NewDB())
 	f := newAppointmentFixture(t)
 	vehicle, appointment, reservation := f.build(t)
@@ -76,6 +80,7 @@ func TestAppointmentRepository_CancelAppointment(t *testing.T) {
 }
 
 func TestAppointmentRepository_CancelAppointment_WhenNotConfirmed_ReturnsDomainError(t *testing.T) {
+	t.Parallel()
 	repo := appointmentsdb.NewAppointmentRepository(testutils.NewDB())
 	f := newAppointmentFixture(t)
 	vehicle, appointment, reservation := f.build(t)
@@ -138,11 +143,11 @@ func newAppointmentFixture(t *testing.T) appointmentFixture {
 	t.Helper()
 
 	return appointmentFixture{
-		dealerShipID:   "dealer-" + common.NewUUIDv7().String(),
-		technicianID:   "tech-" + common.NewUUIDv7().String(),
-		serviceBayID:   "bay-" + common.NewUUIDv7().String(),
-		userID:         common.NewUUIDv7().String(),
-		idempotencyKey: common.NewUUIDv7().String(),
+		dealerShipID:   testutils.RandomID("dealer"),
+		technicianID:   testutils.RandomID("tech"),
+		serviceBayID:   testutils.RandomID("bay"),
+		userID:         testutils.RandomString(),
+		idempotencyKey: testutils.RandomString(),
 		startTime:      time.Now().Add(2 * time.Hour),
 		duration:       30 * time.Minute,
 	}
@@ -201,6 +206,7 @@ func (f appointmentFixture) params(vehicle *domain.Vehicle) domain.RequestAppoin
 var timeApprox = cmpopts.EquateApproxTime(time.Millisecond)
 
 func TestAppointmentRepository_RequestAppointment_StoresDataCorrectly(t *testing.T) {
+	t.Parallel()
 	pool := testutils.NewDB()
 	repo := appointmentsdb.NewAppointmentRepository(pool)
 	f := newAppointmentFixture(t)
@@ -269,6 +275,7 @@ func TestAppointmentRepository_RequestAppointment_StoresDataCorrectly(t *testing
 }
 
 func TestAppointmentRepository_RequestAppointment_IdempotencyKey_ReturnsOriginalReservation(t *testing.T) {
+	t.Parallel()
 	pool := testutils.NewDB()
 	repo := appointmentsdb.NewAppointmentRepository(pool)
 	f := newAppointmentFixture(t)
@@ -315,6 +322,7 @@ const concurrentBookers = 5
 // concurrent bookers — the one place in this suite that violates the "unique
 // technician/bay IDs" convention, because forcing the collision is the point.
 func TestAppointmentRepository_RequestAppointment_RaceCondition_OnlyOneBookerWins(t *testing.T) {
+	t.Parallel()
 	pool := testutils.NewDB()
 	repo := appointmentsdb.NewAppointmentRepository(pool)
 
@@ -330,8 +338,8 @@ func TestAppointmentRepository_RequestAppointment_RaceCondition_OnlyOneBookerWin
 	bookings := make([]booking, concurrentBookers)
 	for i := range bookings {
 		f := shared
-		f.userID = common.NewUUIDv7().String()
-		f.idempotencyKey = common.NewUUIDv7().String()
+		f.userID = testutils.RandomString()
+		f.idempotencyKey = testutils.RandomString()
 		vehicle, appointment, reservation := f.build(t)
 		bookings[i] = booking{fixture: f, vehicle: vehicle, appointment: appointment, reservation: reservation}
 	}

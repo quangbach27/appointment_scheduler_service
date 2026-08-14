@@ -18,10 +18,12 @@ import (
 // 5-minute TTL (.env.test, no clock injection exists). Both are covered at
 // the domain-unit level in internal/appointments/domain/appointment_test.go.
 func TestConfirmAppointment_Validation(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 
 	t.Run("missing X-User-Id", func(t *testing.T) {
+		t.Parallel()
 		resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
 			ctx,
 			appointmentClient.ReservationUUID{UUID: common.NewUUIDv7()},
@@ -34,6 +36,7 @@ func TestConfirmAppointment_Validation(t *testing.T) {
 	})
 
 	t.Run("reservation not found", func(t *testing.T) {
+		t.Parallel()
 		userID := common.NewUUIDv7().String()
 		resp, err := clients.Appointments.ConfirmAppointmentWithResponse(
 			ctx,
@@ -48,6 +51,7 @@ func TestConfirmAppointment_Validation(t *testing.T) {
 }
 
 func TestConfirmAppointment_HappyPath(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -62,6 +66,7 @@ func TestConfirmAppointment_HappyPath(t *testing.T) {
 }
 
 func TestConfirmAppointment_WrongUser(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
@@ -84,6 +89,7 @@ func TestConfirmAppointment_WrongUser(t *testing.T) {
 }
 
 func TestConfirmAppointment_DoubleConfirm(t *testing.T) {
+	t.Parallel()
 	clients := newTestClients(t)
 	ctx := context.Background()
 	userID := common.NewUUIDv7().String()
