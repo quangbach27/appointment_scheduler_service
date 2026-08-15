@@ -1,18 +1,12 @@
 package http
 
 import (
-	"context"
 	"errors"
 	"strings"
 
 	"scheduler/internal/appointments/app"
-	"scheduler/internal/appointments/domain"
 	"scheduler/internal/common"
 )
-
-type ReservationReadModel interface {
-	GetReservationByID(ctx context.Context, userID string, reservationUUID domain.ReservationUUID) (GetReservationResponse, error)
-}
 
 type Handlers struct {
 	service              *app.Service

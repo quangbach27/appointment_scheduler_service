@@ -2,7 +2,13 @@ package http
 
 import (
 	"context"
+
+	"scheduler/internal/appointments/domain"
 )
+
+type ReservationReadModel interface {
+	GetReservationByID(ctx context.Context, userID string, reservationUUID domain.ReservationUUID) (GetReservationResponse, error)
+}
 
 func (h Handlers) GetReservation(ctx context.Context, request GetReservationRequestObject) (GetReservationResponseObject, error) {
 	userID, err := requireUserID(request.Params.XUserId)

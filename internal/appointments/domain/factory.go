@@ -19,9 +19,6 @@ var (
 // (minimum lead time to maximum lead time) and reservation TTL respectively.
 type BookingFactory struct {
 	config BookingFactoryConfig
-	// minStartLeadTime time.Duration
-	// maxStartLeadTime time.Duration
-	// reservationTTL   time.Duration
 }
 
 type BookingFactoryConfig struct {
@@ -48,10 +45,6 @@ func NewBookingFactory(config BookingFactoryConfig) *BookingFactory {
 	}
 }
 
-// AppointmentData holds the fields known immediately after the idempotency
-// check, before any catalog or workforce call. TechnicianID and
-// ServiceBayID aren't part of it: those are only resolved from availability
-// inside createFn, and are supplied later via AppointmentBuilder.
 type AppointmentData struct {
 	DealerShipID string
 	UserID       string
@@ -116,29 +109,21 @@ func (f *BookingFactory) NewAppointmentBuilder(ctx context.Context, data Appoint
 	return &AppointmentBuilder{data: data}, nil
 }
 
-// WithDuration sets the estimated duration, known once the catalog lookup
-// returns.
 func (b *AppointmentBuilder) WithDuration(estimatedDuration time.Duration) *AppointmentBuilder {
 	b.estimatedDuration = estimatedDuration
 	return b
 }
 
-// WithTechnicianID sets the technician resolved from availability inside
-// createFn.
 func (b *AppointmentBuilder) WithTechnicianID(technicianID string) *AppointmentBuilder {
 	b.technicianID = technicianID
 	return b
 }
 
-// WithServiceBayID sets the service bay resolved from availability inside
-// createFn.
 func (b *AppointmentBuilder) WithServiceBayID(serviceBayID string) *AppointmentBuilder {
 	b.serviceBayID = serviceBayID
 	return b
 }
 
-// Build validates the fields resolved after construction (duration,
-// technicianID, serviceBayID) and constructs the Appointment.
 func (b *AppointmentBuilder) Build() (*Appointment, error) {
 	errDetails := []common.ErrorDetails{}
 	if b.technicianID == "" {
