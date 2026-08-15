@@ -1,64 +1,100 @@
 # System Design Document — Unified Service Scheduler
 
-This document describes the appointment-booking backend in this repository: how the domain model was discovered through Event Storming and shaped with Domain-Driven Design, how the code is organized as a Hexagonal (Ports & Adapters) architecture, how data moves through it, why each technology was chosen, how it's tested and released, how it's observed in operation, and how GenAI was used across the design and build process.
+This document covers how the appointment-booking backend is designed, built, and tested, — including the domain model, the architecture, the tech choices, and where GenAI was used.
 
 **Contents**
 1. [Problem & Requirements](#1-problem--requirements)
 2. [Domain Model & Bounded Context](#2-domain-model--bounded-context)
 3. [Technology Choices](#3-technology-choices)
-4. [Data Flow](#4-data-flow)
-5. [Architecture](#5-architecture)
+4. [Architecture](#4-architecture)
+5. [Data Flow](#5-data-flow)
 6. [Component Roles](#6-component-roles)
-7. [Observability Strategy](#7-observability-strategy)
-8. [GenAI Usage in the Design Phase](#8-genai-usage-in-the-design-phase)
+7. [Testing Strategy](#7-testing-strategy)
+8. [Observability Strategy](#8-observability-strategy)
+9. [GenAI Usage in the Design Phase](#9-genai-usage-in-the-design-phase)
 
 ---
 
 ## 1. Problem & Requirements
 
-**Scenario A — The Unified Service Scheduler.** Domain: **Ownership** (post-sale vehicle service).
-
 **Problem Context**: Traditional dealerships manage service appointments using manual whiteboards or paper tickets, leading to double-bookings, poor resource utilization, and lost records.
 
-The Unified Service Scheduler fixes all of this. It automatically checks real-time availability for both technicians and service bays, preventing double-bookings and keeping every record organized.
+**Solution**: The Unified Service Scheduler fixes all of this. It automatically checks real-time availability for both technicians and service bays, preventing double-bookings and keeping every record organized.
 
 Four requirements drive every decision in this document:
 
-1. Request Booking: The customer initiates an appointment request specifying the vehicle, service type, dealership, and target timeframe.
+1. **Request Booking**: The customer initiates an appointment request specifying the vehicle, service type, dealership, and target timeframe.
 
-2. Confirm Booking: The system validates real-time resource availability (Technician + Service Bay) and locks in the reservation.
+2. **Confirm Booking**: The system validates real-time resource availability (Technician + Service Bay) and locks in the reservation.
 
-3. Cancel Booking: The customer or advisor cancels an existing booking, instantly releasing locked resources while maintaining an audit trail.
+3. **Cancel Booking**: The customer or advisor cancels an existing booking, instantly releasing locked resources while maintaining an audit trail.
+
+4. **View Booking**: The customer or advisor retrieves a reservation's current status and details — including the countdown to hold expiry — at any time.
 ---
 
 
 ## 2. Domain Model & Bounded Context
 
-*Discovered through Event Storming — board above.*
+*Discovered through Event Storming.*
 ![alt text](image-3.png)
 
-A booking moves through three states: requesting one creates a **Reservation** — a short hold on a technician and bay; confirming it before the hold expires turns it into a confirmed **Appointment**; confirmed appointments can be cancelled.
+A booking moves through three states: requesting one creates a **Reservation** — a short hold on a technician and service bay; confirming it before the hold expires turns it into a confirmed **Appointment**; confirmed appointments can be cancelled.
 
 One bounded context, **Appointments**, owns this whole lifecycle. Catalog and Workforce sit outside it — Appointments only asks them for candidates and decides availability itself — so each is consumed through a port (`CatalogService`, `WorkforceService`) rather than pulled into the context.
 
-| Term | Meaning |
-|---|---|
-| **Reservation** | The hold created the moment a booking is requested; guards an Appointment until confirmed or expired. |
-| **Appointment** | The booking record: dealership_id, bay, technician, user, service, vehicle, time window, status. |
+### Context map
 
-This bounded context maps directly onto `internal/appointments/` in the code.
+```mermaid
+flowchart LR
+    classDef planned fill:#eee,stroke:#999,color:#555,stroke-dasharray: 4 3
+    classDef acl fill:#fff3e0,stroke:#e65100,color:#4e342e
+
+    subgraph Appointments["Appointments — Core Domain"]
+      A["Reservation · Appointment<br/>owns the booking lifecycle<br/>and the availability decision"]
+      ACL["ACL<br/>adapters/catalog, adapters/workforce"]:::acl
+      A --> ACL
+    end
+    subgraph Catalog["Catalog — Supporting"]
+      C["ServiceCatalogEntry<br/>service type → duration,<br/>required certifications"]:::planned
+    end
+    subgraph Workforce["Workforce — Supporting"]
+      W["Technician · ServiceBay<br/>roster, certifications, review score,<br/>on-duty windows"]:::planned
+    end
+
+    ACL -->|"CatalogService port"| C
+    ACL -->|"WorkforceService port"| W
+```
+**Appointments is the core domain**. It's the reason this system exists, and it's the only part of the codebase that enforces the real business rules: no double-booking, the two-phase hold, the two expiries.
+
+**Catalog and Workforce are supporting subdomains**. They're real parts of the business, but this project doesn't own them and doesn't try to model them fully.
+
+**Appointments is the customer in both relationships**. It defines its own types — `ServiceCatalogEntry`, `Technician`, `ServiceBay` — and each `adapters/<service>` package translates whatever `Catalog` or `Workforce` actually look like into that shape. Their data models, IDs, and vocabulary never leak into domain.
+
+#### What each one does
+
+Catalog answers one question: given a service type, how long does it take and what certifications does it need? (GetServiceEntry.) Appointments never caches this — it asks fresh every time someone requests a booking.
+
+Workforce answers a different question: for a given time window, which technicians and bays are on duty? (ListTechnicians, ListServiceBays.) "On duty" just means not off that day and not under maintenance. Workforce doesn't know what Appointments has booked — it never says a resource is busy because of our bookings.
+
+#### The Key design decision
+
+Availability is always decided from Appointments' own data, never from what Catalog or Workforce report. They only hand back candidates — technicians and bays that could work. Appointments checks those candidates against its own busy list, inside one database transaction (`GetBusyServiceBaysAndTechnicians`).
+
+**Why this matters**: if Appointments trusted an outside system's idea of "available," two systems could disagree and double-book the same slot. Keeping that decision inside one transaction is what makes the no-double-booking guarantee actually work
 
 ---
 
 ## 3. Technology Choices
 
-| Choice | Why it matters |
-|---|---|
-| **Echo + OpenAPI (oapi-codegen, strict mode)** | `openapi.yaml` is the single source of truth for both server and client; strict-mode codegen gives handlers fully typed request/response structs, so the contract and the implementation can't drift apart. |
-| **sqlc + Postgres** | Domain queries are simple — no complex joins — so generated SQL beats ORM overhead on performance |
-| **golang-migrate** | Versioned, embedded SQL migrations per bounded context, applied automatically at startup — no manual migration step. |
-| **lefthook + Makefile** | The same `make` targets (test, lint, fmt) run locally and as a pre-push hook — bad code is caught before it leaves the machine, not just in CI. |
-| **GitHub Actions** | Every PR runs the same quality gate (lint → test → build); merging to `main` auto-builds, vulnerability-scans, and publishes the image — nothing is hand-built or hand-shipped. |
+| Choice | Version | Why it matters |
+|---|---|---|
+| **Golang** | 1.26.1 | Static typing and a single compiled binary keep deployment simple. |
+| **Echo Router + OpenAPI (oapi-codegen, strict mode)** | Echo v4.15, oapi-codegen v2.8 | `openapi.yaml` is the single source of truth for both server and client; strict-mode codegen gives handlers fully typed request/response structs, so the contract and the implementation can't drift apart. |
+| **sqlc + pgx/v5** | sqlc v1.31, pgx v5.9 | Domain queries are simple — no complex joins — so generated SQL beats ORM overhead on performance. |
+| **Postgres** | 17 | Mature ecosystem and native type support that pairs well with pgx/sqlc. |
+| **golang-migrate** | v4.19 | Versioned, embedded SQL migrations per bounded context, applied automatically at startup — no manual migration step. |
+| **lefthook + Makefile** | lefthook v1.x | The same `make` targets (test, lint, fmt) run locally and as a pre-push hook — bad code is caught before it leaves the machine, not just in CI. |
+| **GitHub Actions** | — | Every PR runs the same quality gate (lint → test → build); merging to `main` auto-builds, vulnerability-scans, and publishes the image — nothing is hand-built or hand-shipped. |
 
 ---
 
@@ -95,11 +131,10 @@ flowchart TB
     ReadModel --> PG
 ```
 
-- **No API Gateway exists yet** (shown dashed above as planned). Today `X-User-Id` is just a header the caller supplies and `ports/http` handlers check for presence, not authenticity — there's no auth middleware, and nothing distinguishes a guest from a logged-in user. The gateway is where that responsibility belongs: authenticate the caller, resolve guest vs. logged-in, and attach a trustworthy `X-User-Id` before the request ever reaches this bounded context.
-- The composition root (`cmd/main.go`, `internal/svc.go`) wires exactly one module today (`appointments`), through `Init` → `RegisterContracts` → `Verify()` → `RegisterHttp`. `Verify()` runs once, after every module has registered, so a missing cross-module contract fails fast at startup rather than at first request. `Svc.Run` uses `errgroup.WithContext` to run the HTTP server and a shutdown watcher as two goroutines — `SIGINT`/`SIGTERM` cancels the context, the watcher closes the pgx pool and calls `echo.Shutdown` with a 30s grace period.
-- `CatalogService` and `WorkforceService` are ports — Go interfaces declared and depended on by the `app` layer (`internal/appointments/app/request_appointment.go`). Each is implemented in its own `adapters/<service>` package (`adapters/catalog`, `adapters/workforce`); today only the in-memory stub implementation exists in each, injected via `internal.ExternalService`. The convention is for a real integration to sit beside the stub in the same package once one exists — swappable without touching `app` or `domain`.
-- Ports aren't uniformly `app`-owned: `AppointmentRepository` is declared by `domain` (`internal/appointments/domain/appointment.go`) and implemented by `adapters/db`, since it's the domain layer that needs a way to persist and reload its own aggregates. `ReservationReadModel` is declared by `ports/http` itself (`internal/appointments/ports/http/handlers.go`) and also implemented in `adapters/db` — the HTTP layer owns its own read-side dependency because the CQRS query path bypasses `domain`/`app` entirely. Each interface is declared by whichever layer actually depends on it, not by one canonical location.
-- Local dev runs both `scheduler-app` and `scheduler-db` (Postgres 17) under `docker-compose.yaml`, with source bind-mounted and a file-watcher (`reflex`) restarting the process on change. Production builds a separate multi-stage image (`docker/app/prod/Dockerfile`): a static, stripped Go binary (`CGO_ENABLED=0`, `-ldflags="-w -s"`) copied onto `gcr.io/distroless/static-debian13:nonroot-amd64` — no shell, no package manager, runs as a non-root user.
+- **No API Gateway yet** (dashed above): `X-User-Id` is just a caller-supplied header, checked for presence only, not authenticity. Real auth belongs at the gateway.
+- `CatalogService`/`WorkforceService` are ports owned by `app`; only stub adapters exist today (`adapters/catalog`, `adapters/workforce`), swappable for real integrations without touching `app`/`domain`. No per-call timeout or circuit breaker exists yet — harmless while stubbed, worth fixing before a real integration lands.
+- Ports aren't uniformly `app`-owned: `AppointmentRepository` is declared by `domain`, `ReservationReadModel` by `ports/http` — each lives with whichever layer depends on it.
+- Local dev runs via `docker-compose.yaml` with hot reload; production is a statically-built, distroless, non-root image.
 
 ---
 
@@ -161,6 +196,7 @@ Notes on the write path:
 - **The availability read is load-bearing, not a guard.** It runs *inside* the SERIALIZABLE transaction specifically so Postgres's Serializable Snapshot Isolation (SSI) can detect write-skew between concurrent bookings — without that read, two concurrent requests could both see "free" and both commit into the same slot.
 - **External calls happen before the transaction**, which can be retried on serialization failure and would otherwise re-issue them.
 - **The two workforce lookups run concurrently** (highlighted above, via `errgroup.WithContext`) since neither depends on the other's result — only the prior Catalog call's `duration`/`requiredCertifications` gate them.
+- **The retry budget is bounded, not open-ended**: exponential backoff starting at 1ms, doubling up to a 500ms cap, ±50% jitter, 10 tries max (`internal/common/db.go`). Worst case, that adds roughly 1s of latency under sustained contention before the request gives up and returns an error — a concrete tail-latency cost of choosing SERIALIZABLE over a non-retrying strategy.
 - **Two expiries, resolved differently**: a `Reservation`'s hold TTL closes the checkout window with no row mutation (checked on read/confirm); an `Appointment`'s no-show state (`pending` with a past start) is computed on read and never stored.
 
 ### Confirm & Cancel
@@ -213,8 +249,6 @@ sequenceDiagram
     H-->>C: 204
 ```
 
-The read side (`GetReservation`) skips this shape entirely: it's served directly by the `ReservationReadModel` — a single joined SQL query returning the API response DTO, bypassing the domain and the write-side repository altogether (CQRS).
-
 ---
 
 
@@ -237,19 +271,29 @@ The read side (`GetReservation`) skips this shape entirely: it's served directly
 
 ---
 
-## 7. Observability Strategy
+## 7. Testing Strategy
 
-### Implemented today
+| Tier | Command | Owns |
+|---|---|---|
+| Unit | `make test-unit` | Domain rules, TDD, table-driven — no HTTP/DB, so this is where corner cases live. `app/` and `ports/http/` carry none; Component covers them. |
+| Integration | `make test-integration` | Adapter/repository layer against real Postgres (`integration` build tag, `.env.test`) — verifies the adapter *uses* infrastructure correctly (e.g. SERIALIZABLE actually detects write-skew), provable only against the real engine, not an in-memory fake. |
+| Component | `make test-component` (`tests/component/`) | Real service, real internal layers, stub Catalog/Workforce adapters, driven only through the generated OpenAPI client — happy-path + API contract only; Unit/Integration already own corner cases. |
+
+Each tier owns a distinct kind of correctness, none re-covering the one below it ([Three Dots Labs' microservices test-architecture model](https://threedots.tech/post/microservices-test-architecture/)). The test database is long-lived and never truncated, so every tier carves out its own data rather than resetting shared state.
+
+---
+
+## 8. Observability Strategy
+
 
 - **Structured logging** via `log/slog` — JSON in non-dev environments, a human-readable colorized handler in dev.
 - **Correlation IDs**: a middleware reads (or generates) a `Correlation-ID` header, attaches a logger carrying it to the request context, and echoes it back on the response — every log line for a request, across every layer, carries the same ID.
 - **Request/response logging**: one line per request with method, URI, status, duration, and truncated request/response bodies (full bodies at `debug` level).
 - **Typed, stable error responses**: every error surfaces as `{message, slug, details}` — clients can branch on `slug` without parsing prose, and internals never leak past the mapping.
-- **Health/readiness**: `GET /healthz`, plus a Postgres container healthcheck (`pg_isready`) gating app startup in compose.
 
 ---
 
-## 8. GenAI Usage in the Design Phase
+## 9. GenAI Usage in the Design Phase
 
 **On this document specifically:** the Event Storming session (Section 2) was human-led domain discovery — the sticky-note board was produced by the person, not generated. GenAI's role there was formalization: transcribing the board into a structured diagram, deriving the bounded-context boundary and the ubiquitous-language table *from* it, and cross-checking every term against the actual domain code (`internal/appointments/CLAUDE.md`, the domain package) rather than inventing or assuming vocabulary. Where the board and the code disagreed on a name (e.g. the board's "Canceled Appointment" vs. the code's `CancelAppointment`), the code was treated as the source of truth and the discrepancy was noted, not silently resolved. The document's structure was likewise revised with GenAI's help to mirror the actual order of the work — stating the problem before the domain model that resulted from investigating it — rather than presenting the finished model as if it existed before the requirements did.
 
@@ -257,7 +301,7 @@ The read side (`GetReservation`) skips this shape entirely: it's served directly
 
 1. **Explore before proposing.** Read-only exploration passes over the actual code — often run in parallel — built an accurate, current picture before any change was designed, rather than designing against assumptions about what the code probably did.
 2. **Plan, then get explicit approval before editing.** Every non-trivial change (the `RequestBooking` concurrency fan-out, the Makefile fix, the test-parallelization work) was written up as a plan and approved before a single line changed.
-3. **Evidence-driven pivots mid-investigation.** The missing database index (Section 3) wasn't assumed fixed once added — it was confirmed via `EXPLAIN`, which showed the query plan actually switching from a sequential scan to an index scan.
+3. **Evidence-driven pivots mid-investigation.** The missing database index (Section 5, on `dealer_ship_id, start_time, estimated_end_time`) wasn't assumed fixed once added — it was confirmed via `EXPLAIN`, which showed the query plan actually switching from a sequential scan to an index scan.
 4. **Human checkpoints on decisions a human should own.** Widening the SERIALIZABLE retry budget touches production behavior for every concurrent booking, not just tests — that tradeoff (bounded tail-latency increase vs. flaky failures) was laid out with concrete numbers and left to the person to decide, rather than resolved unilaterally.
 5. **Empirical verification, not single-run confidence.** Claims of "fixed" were backed by repeated stress runs (`go test -count=N` loops, tens of iterations) comparing failure rates before and after, not a single green run.
 
