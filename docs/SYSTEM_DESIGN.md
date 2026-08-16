@@ -273,13 +273,15 @@ sequenceDiagram
 
 ## 7. Testing Strategy
 
-| Tier | Command | Owns |
-|---|---|---|
-| Unit | `make test-unit` | Domain rules, TDD, table-driven — no HTTP/DB, so this is where corner cases live. `app/` and `ports/http/` carry none; Component covers them. |
-| Integration | `make test-integration` | Adapter/repository layer against real Postgres (`integration` build tag, `.env.test`) — verifies the adapter *uses* infrastructure correctly (e.g. SERIALIZABLE actually detects write-skew), provable only against the real engine, not an in-memory fake. |
-| Component | `make test-component` (`tests/component/`) | Real service, real internal layers, stub Catalog/Workforce adapters, driven only through the generated OpenAPI client — happy-path + API contract only; Unit/Integration already own corner cases. |
+| Tier | Command | Scope & Ownership | Boundary & Dependencies | Data Strategy |
+|---|---|---|---|---|
+| Unit | `make test-unit` | **Domain logic & invariants** — table-driven tests covering edge cases, business rules, and state transitions. | Pure Go code. Zero external dependencies (no HTTP, DB, or network). `app/` and `ports/http/` carry none; Component covers them. | N/A — in-memory state instantiated per test. |
+| Integration | `make test-integration` | **Adapter & infrastructure correctness** — verifies actual DB driver behavior, SQL syntax, and transactions (e.g. SERIALIZABLE write-skew detection). | Adapters only, against real Postgres (`integration` build tag, `.env.test`) — provable only against the real engine, not an in-memory fake. | Unique entity prefixes — tests construct unique keys/UUIDs per run; never clean or truncate shared state. |
+| Component | `make test-component` (`tests/component/`) | **API contract & end-to-end flow** — happy-path service verification driven strictly via the generated OpenAPI client. Covers routing, middleware, and request/response mapping. | Real application stack (HTTP + `app.Service` + DB), but stubs external HTTP services (Catalog, Workforce). | Isolated test fixtures — each test suite generates its own fixture data using unique domain identifiers. |
 
-Each tier owns a distinct kind of correctness, none re-covering the one below it ([Three Dots Labs' microservices test-architecture model](https://threedots.tech/post/microservices-test-architecture/)). The test database is long-lived and never truncated, so every tier carves out its own data rather than resetting shared state.
+Each tier owns a distinct kind of correctness, none re-covering the one below it. The test database is long-lived and never truncated, so every tier carves out its own data rather than resetting shared state.
+
+External services are mocked at the Go interface level rather than via HTTP, injected the same way in production and tests, with fixtures deterministic enough that every interesting branch is reachable without a request-matching framework.
 
 ---
 
